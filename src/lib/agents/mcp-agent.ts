@@ -3,6 +3,103 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { McpServerAuth } from '../mcp-auth-sync';
 
+export type McpErrorCode =
+  | 'ZOHO_TOKEN_EXPIRED'
+  | 'ZOHO_UNREACHABLE'
+  | 'ZOHO_NOT_CONFIGURED'
+  | 'ZOHO_UNKNOWN';
+
+export class McpError extends Error {
+  code: McpErrorCode;
+  cause?: unknown;
+
+  constructor(code: McpErrorCode, message: string, cause?: unknown) {
+    super(message);
+    this.name = 'McpError';
+    this.code = code;
+    this.cause = cause;
+  }
+}
+
+function getErrorText(err: unknown): string {
+  if (err == null) return '';
+  const anyErr = err as Record<string, unknown>;
+  return [
+    anyErr.code,
+    anyErr.status,
+    anyErr.message,
+    anyErr.body,
+    (anyErr.response as Record<string, unknown> | undefined)?.body,
+    String(err),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+}
+
+function isUnauthorizedError(err: unknown): boolean {
+  const anyErr = err as { code?: unknown; status?: unknown; message?: unknown };
+  return anyErr?.code === 401
+    || anyErr?.status === 401
+    || String(anyErr?.message || '').includes('401')
+    || String(err || '').includes('401');
+}
+
+function isTokenExpiredError(err: unknown): boolean {
+  const anyErr = err as { code?: unknown; status?: unknown };
+  if (anyErr?.status === 403 || anyErr?.code === 403) {
+    return true;
+  }
+  if (isUnauthorizedError(err)) {
+    return true;
+  }
+
+  const text = getErrorText(err);
+  return text.includes('invalid_token')
+    || text.includes('expired')
+    || text.includes('unauthorized');
+}
+
+function isNetworkError(err: unknown): boolean {
+  const text = getErrorText(err).toUpperCase();
+  return text.includes('ECONNREFUSED')
+    || text.includes('ETIMEDOUT')
+    || text.includes('ENOTFOUND')
+    || text.includes('ECONNRESET')
+    || text.includes('EHOSTUNREACH')
+    || text.includes('EAI_AGAIN')
+    || text.includes('FETCH FAILED')
+    || text.includes('NETWORK');
+}
+
+function classifyMcpError(err: unknown): McpError {
+  if (err instanceof McpError) {
+    return err;
+  }
+
+  if (isTokenExpiredError(err)) {
+    return new McpError(
+      'ZOHO_TOKEN_EXPIRED',
+      'Zoho/MCP authentication token is expired or invalid.',
+      err
+    );
+  }
+
+  if (isNetworkError(err)) {
+    return new McpError(
+      'ZOHO_UNREACHABLE',
+      'Zoho/MCP connection is unreachable.',
+      err
+    );
+  }
+
+  return new McpError(
+    'ZOHO_UNKNOWN',
+    'Unknown Zoho/MCP execution failure.',
+    err
+  );
+}
+
 function normaliseServerConfig(name: string, conf: any): any {
   const normalised = { name, ...conf };
   
@@ -145,7 +242,7 @@ export async function listAllMCPTools(mcpServersConfig: any, projectId?: string)
       }
     } catch (err) {
       console.error(`Failed to list tools for server ${rawServer.name || rawServer.url}:`, err);
-      if (transport) { try { await transport.close(); } catch (e) {} }
+      if (transport) { try { await transport.close(); } catch {} }
     }
   }
 
@@ -163,7 +260,10 @@ export async function executeMCPCommand(mcpConfig: any, commandData: any, projec
   }
 
   if (servers.length === 0) {
-    throw new Error('No MCP Servers configured.');
+    throw new McpError(
+      'ZOHO_NOT_CONFIGURED',
+      'No MCP Servers configured.'
+    );
   }
 
   const toolName = commandData.action;
@@ -208,7 +308,7 @@ export async function executeMCPCommand(mcpConfig: any, commandData: any, projec
         await transport.close();
         return result;
       } catch (err: any) {
-        const is401 = err?.code === 401 || err?.status === 401 || String(err?.message || '').includes('401') || String(err || '').includes('401');
+        const is401 = isUnauthorizedError(err);
         if (is401 && auth && projectId) {
           console.log(`[MCP-Auth] 401/Unauthorized for ${activeServer.name} — refreshing token and retrying...`);
           try {
@@ -221,19 +321,29 @@ export async function executeMCPCommand(mcpConfig: any, commandData: any, projec
             await transport.close();
             return retryResult;
           } catch (retryErr: any) {
-            lastError = retryErr;
+            const classified = classifyMcpError(retryErr);
+            lastError = classified.code === 'ZOHO_UNREACHABLE'
+              ? classified
+              : new McpError(
+                  'ZOHO_TOKEN_EXPIRED',
+                  'Retry after token refresh failed.',
+                  retryErr
+                );
             console.error(`[MCP-Auth] Retry after token refresh failed for ${activeServer.name}:`, retryErr);
           }
         } else {
-          throw err;
+          throw classifyMcpError(err);
         }
       }
     } catch (error: any) {
-      console.error(`Failed to execute tool ${toolName} on server ${rawServer.name || 'unknown'}:`, error.message);
-      lastError = error;
-      if (transport) { try { await transport.close(); } catch (e) {} }
+      console.error(`Failed to execute tool ${toolName} on server ${rawServer.name || 'unknown'}:`, error);
+      lastError = error instanceof McpError ? error : classifyMcpError(error);
+      if (transport) { try { await transport.close(); } catch {} }
     }
   }
 
-  throw lastError || new Error(`Failed to execute tool ${toolName} on any configured servers.`);
+  throw lastError || new McpError(
+    'ZOHO_UNKNOWN',
+    `Failed to execute tool ${toolName} on any configured servers.`
+  );
 }

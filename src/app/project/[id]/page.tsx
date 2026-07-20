@@ -2,11 +2,12 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
-import { useSession } from 'next-auth/react';
+import { useSession, signIn } from 'next-auth/react';
 import { db } from '@/lib/firebase';
 import { doc, onSnapshot, setDoc, arrayUnion } from 'firebase/firestore';
 import ReactMarkdown from 'react-markdown';
 import A2UIWidget from '@/app/components/A2UIWidget';
+import { apiFetch, ApiError, getUserMessage, handleApiError } from '@/app/lib/api-client';
 
 type Message = {
   role: 'user' | 'agent';
@@ -69,11 +70,33 @@ export default function ProjectPage() {
   const [isAddingServer, setIsAddingServer] = useState(false);
   const [oauthToast, setOauthToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
+  const notify = (message: string, type: 'success' | 'error' = 'error') => {
+    setOauthToast({ type, message });
+  };
+
+  const triggerSignIn = () => signIn('google');
+
+  const parseMcpConfigOrNotify = (): Record<string, unknown> | null => {
+    try {
+      return JSON.parse(mcpConfigText);
+    } catch {
+      notify('Invalid JSON in MCP Configuration');
+      return null;
+    }
+  };
+
+  const putProjectSettings = async (body: Record<string, unknown>) => {
+    await apiFetch(`/api/projects/${projectId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  };
+
   // Tools State
   const [availableTools, setAvailableTools] = useState<any[]>([]);
   const [selectedTools, setSelectedTools] = useState<string[]>([]);
   const [toolsLoading, setToolsLoading] = useState(false);
-  const [toolSearch, setToolSearch] = useState('');
 
   // Specifications State
   const [isEditingSpecs, setIsEditingSpecs] = useState(false);
@@ -99,10 +122,9 @@ export default function ProjectPage() {
   useEffect(() => {
     async function fetchProject() {
       try {
-        const res = await fetch(`/api/projects/${projectId}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.project) {
+        const res = await apiFetch(`/api/projects/${projectId}`);
+        const data = await res.json();
+        if (data.project) {
             const loadedSpecs = {
               overallRequirements: data.project.overallRequirements || '',
               crmRoadmap: data.project.crmRoadmap || '',
@@ -125,7 +147,7 @@ export default function ProjectPage() {
                 if (!data.project.enabledMcpServers && data.project.mcpConfig.mcpServers) {
                   setEnabledMcpServers(Object.keys(data.project.mcpConfig.mcpServers));
                 }
-              } catch(e) {}
+              } catch {}
             } else if (data.project.mcpServers && Array.isArray(data.project.mcpServers)) {
               // Convert legacy array to JSON format
               const configObj: any = { mcpServers: {} };
@@ -144,9 +166,8 @@ export default function ProjectPage() {
             }
             if (data.project.driveFolderId) setDriveFolderId(data.project.driveFolderId);
           }
-        }
       } catch (err) {
-        console.error("Failed to fetch project details", err);
+        handleApiError(err, (message) => notify(message), triggerSignIn);
       }
     }
     fetchProject();
@@ -154,12 +175,15 @@ export default function ProjectPage() {
 
   useEffect(() => {
     if (activeTab === 'history') {
-      fetch(`/api/projects/${projectId}/logs`)
-        .then(res => res.json())
-        .then(data => {
+      (async () => {
+        try {
+          const res = await apiFetch(`/api/projects/${projectId}/logs`);
+          const data = await res.json();
           if (data.logs) setLogs(data.logs);
-        })
-        .catch(err => console.error(err));
+        } catch (err) {
+          handleApiError(err, (message) => notify(message), triggerSignIn);
+        }
+      })();
     }
   }, [activeTab, projectId]);
 
@@ -167,20 +191,18 @@ export default function ProjectPage() {
   useEffect(() => {
     async function fetchChatSessions() {
       try {
-        const res = await fetch(`/api/projects/${projectId}/chats`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.chats) {
-            setChatSessions(data.chats);
-            if (data.chats.length > 0) {
-              setActiveChatId(data.chats[0].id);
-            } else {
-              handleCreateNewChat();
-            }
+        const res = await apiFetch(`/api/projects/${projectId}/chats`);
+        const data = await res.json();
+        if (data.chats) {
+          setChatSessions(data.chats);
+          if (data.chats.length > 0) {
+            setActiveChatId(data.chats[0].id);
+          } else {
+            await handleCreateNewChat();
           }
         }
       } catch (err) {
-        console.error("Failed to load chat sessions:", err);
+        handleApiError(err, (message) => notify(message), triggerSignIn);
       }
     }
     if (projectId) {
@@ -220,19 +242,17 @@ export default function ProjectPage() {
 
   const handleCreateNewChat = async () => {
     try {
-      const res = await fetch(`/api/projects/${projectId}/chats`, {
+      const res = await apiFetch(`/api/projects/${projectId}/chats`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
       });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.chat) {
-          setChatSessions(prev => [data.chat, ...prev]);
-          setActiveChatId(data.chat.id);
-        }
+      const data = await res.json();
+      if (data.chat) {
+        setChatSessions(prev => [data.chat, ...prev]);
+        setActiveChatId(data.chat.id);
       }
     } catch (err) {
-      console.error("Failed to create new chat:", err);
+      handleApiError(err, (message) => notify(message), triggerSignIn);
     }
   };
 
@@ -240,20 +260,18 @@ export default function ProjectPage() {
     e.preventDefault();
     if (!activeChatId || !editChatTitleVal.trim()) return;
     try {
-      const res = await fetch(`/api/projects/${projectId}/chats/${activeChatId}`, {
+      const res = await apiFetch(`/api/projects/${projectId}/chats/${activeChatId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: editChatTitleVal.trim() })
       });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.chat) {
-          setChatSessions(prev => prev.map(c => c.id === activeChatId ? data.chat : c));
-          setIsEditingChatTitle(false);
-        }
+      const data = await res.json();
+      if (data.chat) {
+        setChatSessions(prev => prev.map(c => c.id === activeChatId ? data.chat : c));
+        setIsEditingChatTitle(false);
       }
     } catch (err) {
-      console.error("Failed to rename chat:", err);
+      handleApiError(err, (message) => notify(message), triggerSignIn);
     }
   };
 
@@ -261,21 +279,19 @@ export default function ProjectPage() {
     if (!activeChatId) return;
     if (!confirm("Are you sure you want to delete this chat session? This action cannot be undone.")) return;
     try {
-      const res = await fetch(`/api/projects/[id]/chats/${activeChatId}`.replace('[id]', projectId), {
+      await apiFetch(`/api/projects/${projectId}/chats/${activeChatId}`, {
         method: 'DELETE'
       });
-      if (res.ok) {
-        const remainingChats = chatSessions.filter(c => c.id !== activeChatId);
-        setChatSessions(remainingChats);
-        setIsEditingChatTitle(false);
-        if (remainingChats.length > 0) {
-          setActiveChatId(remainingChats[0].id);
-        } else {
-          handleCreateNewChat();
-        }
+      const remainingChats = chatSessions.filter(c => c.id !== activeChatId);
+      setChatSessions(remainingChats);
+      setIsEditingChatTitle(false);
+      if (remainingChats.length > 0) {
+        setActiveChatId(remainingChats[0].id);
+      } else {
+        await handleCreateNewChat();
       }
     } catch (err) {
-      console.error("Failed to delete chat:", err);
+      handleApiError(err, (message) => notify(message), triggerSignIn);
     }
   };
 
@@ -324,7 +340,7 @@ export default function ProjectPage() {
                           file.name.endsWith('.txt');
       
       if (!isTextOrCsv) {
-        alert(`File format of "${file.name}" is not supported. Please upload plain text, CSV, JSON, or Markdown files.`);
+        notify(`File format of "${file.name}" is not supported. Please upload plain text, CSV, JSON, or Markdown files.`);
         return;
       }
  
@@ -353,26 +369,22 @@ export default function ProjectPage() {
     const serverName = newServerForm.name.trim();
     const serverUrl = newServerForm.url.trim();
     if (!serverName || !serverUrl) {
-      alert("Please provide both Server Name and SSE Endpoint URL.");
+      notify('Please provide both Server Name and SSE Endpoint URL.');
       return;
     }
     setIsAddingServer(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/oauth/initiate`, {
+      const res = await apiFetch(`/api/projects/${projectId}/oauth/initiate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ serverName, serverUrl }),
       });
       const data = await res.json();
-      if (res.ok && data.url) {
-        // Redirect the browser to Zoho OAuth page
+      if (data.url) {
         window.location.href = data.url;
-      } else {
-        alert(data.error || 'Failed to initiate OAuth');
-        setIsAddingServer(false);
       }
-    } catch (err: any) {
-      alert(`Error initiating OAuth: ${err.message}`);
+    } catch (err) {
+      handleApiError(err, (message) => notify(message), triggerSignIn);
       setIsAddingServer(false);
     }
   };
@@ -382,31 +394,26 @@ export default function ProjectPage() {
     const serverUrl = newServerForm.url.trim();
     const credentialsJson = newServerCredentialsJson.trim();
     if (!serverName || !credentialsJson) {
-      alert("Please enter Server Name and paste the Credentials JSON.");
+      notify('Please enter Server Name and paste the Credentials JSON.');
       return;
     }
     try {
-      JSON.parse(credentialsJson); // local check
-    } catch (e) {
-      alert("Credentials payload is not valid JSON.");
+      JSON.parse(credentialsJson);
+    } catch {
+      notify('Credentials payload is not valid JSON.');
       return;
     }
     setIsAddingServer(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/credentials`, {
+      await apiFetch(`/api/projects/${projectId}/credentials`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ serverName, serverUrl: serverUrl || null, credentialsJson }),
       });
-      const data = await res.json();
-      if (res.ok) {
-        alert("Credentials verified and saved successfully!");
-        window.location.reload();
-      } else {
-        alert(data.error || 'Failed to save credentials');
-      }
-    } catch (err: any) {
-      alert(`Error: ${err.message}`);
+      notify('Credentials verified and saved successfully!', 'success');
+      window.location.reload();
+    } catch (err) {
+      handleApiError(err, (message) => notify(message), triggerSignIn);
     } finally {
       setIsAddingServer(false);
     }
@@ -416,14 +423,14 @@ export default function ProjectPage() {
     const serverName = newServerForm.name.trim();
     const configJson = newServerConfigJson.trim();
     if (!serverName || !configJson) {
-      alert("Please enter Server Name and paste the configuration JSON.");
+      notify('Please enter Server Name and paste the configuration JSON.');
       return;
     }
     let parsedServerConfig = null;
     try {
       parsedServerConfig = JSON.parse(configJson);
-    } catch (e) {
-      alert("Server Configuration is not valid JSON.");
+    } catch {
+      notify('Server Configuration is not valid JSON.');
       return;
     }
     setIsAddingServer(true);
@@ -431,7 +438,7 @@ export default function ProjectPage() {
       let parsedConfig: any = { mcpServers: {} };
       try {
         parsedConfig = JSON.parse(mcpConfigText);
-      } catch (e) {}
+      } catch {}
 
       if (!parsedConfig.mcpServers) parsedConfig.mcpServers = {};
       parsedConfig.mcpServers[serverName] = parsedServerConfig;
@@ -445,31 +452,21 @@ export default function ProjectPage() {
       }
       setEnabledMcpServers(updatedEnabledServers);
 
-      // Save setting to backend
-      const res = await fetch(`/api/projects/${projectId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          mcpConfig: parsedConfig, 
-          driveFolderId, 
-          selectedTools, 
-          enabledMcpServers: updatedEnabledServers 
-        })
+      await putProjectSettings({
+        mcpConfig: parsedConfig,
+        driveFolderId,
+        selectedTools,
+        enabledMcpServers: updatedEnabledServers
       });
-      if (res.ok) {
-        setShowAddServerForm(false);
-        setNewServerForm({ name: '', transport: 'sse', url: '', command: '', args: '' });
-        setNewServerCredentialsJson('');
-        setNewServerConfigJson('{\n  "url": ""\n}');
-        
-        // Reload tools automatically
-        handleFetchTools();
-      } else {
-        const data = await res.json();
-        alert(data.error || 'Failed to save configuration');
-      }
-    } catch (err: any) {
-      alert(`Error: ${err.message}`);
+
+      setShowAddServerForm(false);
+      setNewServerForm({ name: '', transport: 'sse', url: '', command: '', args: '' });
+      setNewServerCredentialsJson('');
+      setNewServerConfigJson('{\n  "url": ""\n}');
+
+      handleFetchTools();
+    } catch (err) {
+      handleApiError(err, (message) => notify(message), triggerSignIn);
     } finally {
       setIsAddingServer(false);
     }
@@ -515,67 +512,49 @@ export default function ProjectPage() {
     if (!confirm(`Are you sure you want to delete MCP Server connection "${serverName}"? This will remove its configuration and any saved credentials.`)) return;
     
     try {
-      const res = await fetch(`/api/projects/${projectId}/credentials`, {
+      await apiFetch(`/api/projects/${projectId}/credentials`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ serverName })
       });
-      
-      if (res.ok) {
-        // Update client states
-        let parsedConfig: any = { mcpServers: {} };
-        try {
-          parsedConfig = JSON.parse(mcpConfigText);
-        } catch (e) {}
 
-        if (parsedConfig.mcpServers && parsedConfig.mcpServers[serverName]) {
-          delete parsedConfig.mcpServers[serverName];
-        }
+      let parsedConfig: any = { mcpServers: {} };
+      try {
+        parsedConfig = JSON.parse(mcpConfigText);
+      } catch {}
 
-        const updatedConfigText = JSON.stringify(parsedConfig, null, 2);
-        setMcpConfigText(updatedConfigText);
-
-        const updatedEnabled = enabledMcpServers.filter(s => s !== serverName);
-        setEnabledMcpServers(updatedEnabled);
-
-        // Discard selected tools from this server
-        const toolsToRemove = availableTools.filter(t => t.serverName === serverName).map(t => t.name);
-        const updatedSelectedTools = selectedTools.filter(t => !toolsToRemove.includes(t));
-        setSelectedTools(updatedSelectedTools);
-
-        // Fetch/refresh tools
-        setTimeout(() => {
-          handleFetchTools();
-        }, 500);
-
-        alert(`Successfully deleted MCP Server "${serverName}".`);
-      } else {
-        const data = await res.json().catch(() => ({}));
-        alert(data.error || 'Failed to delete MCP server');
+      if (parsedConfig.mcpServers && parsedConfig.mcpServers[serverName]) {
+        delete parsedConfig.mcpServers[serverName];
       }
-    } catch (err: any) {
-      alert(`Error deleting MCP server: ${err.message}`);
+
+      const updatedConfigText = JSON.stringify(parsedConfig, null, 2);
+      setMcpConfigText(updatedConfigText);
+
+      const updatedEnabled = enabledMcpServers.filter(s => s !== serverName);
+      setEnabledMcpServers(updatedEnabled);
+
+      const toolsToRemove = availableTools.filter(t => t.serverName === serverName).map(t => t.name);
+      const updatedSelectedTools = selectedTools.filter(t => !toolsToRemove.includes(t));
+      setSelectedTools(updatedSelectedTools);
+
+      setTimeout(() => {
+        handleFetchTools();
+      }, 500);
+
+      notify(`Successfully deleted MCP Server "${serverName}".`, 'success');
+    } catch (err) {
+      handleApiError(err, (message) => notify(message), triggerSignIn);
     }
   };
 
   const handleSaveSpecs = async () => {
     setIsSavingSpecs(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editedSpecs)
-      });
-      if (res.ok) {
-        setSpecs(editedSpecs);
-        setIsEditingSpecs(false);
-      } else {
-        const data = await res.json().catch(() => ({}));
-        alert(data.error || 'Failed to save specifications');
-      }
-    } catch (err: any) {
-      console.error("Failed to save specs", err);
-      alert(`Error saving specifications: ${err.message}`);
+      await putProjectSettings(editedSpecs);
+      setSpecs(editedSpecs);
+      setIsEditingSpecs(false);
+    } catch (err) {
+      handleApiError(err, (message) => notify(message), triggerSignIn);
     } finally {
       setIsSavingSpecs(false);
     }
@@ -584,27 +563,11 @@ export default function ProjectPage() {
   const handleSaveSettings = async () => {
     setIsSavingSpecs(true);
     try {
-      let parsedConfig = null;
-      try {
-        parsedConfig = JSON.parse(mcpConfigText);
-      } catch (err) {
-        alert("Invalid JSON in MCP Configuration");
-        setIsSavingSpecs(false);
-        return;
-      }
-      const res = await fetch(`/api/projects/${projectId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mcpConfig: parsedConfig, driveFolderId, selectedTools, enabledMcpServers })
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || `Server responded with status ${res.status}`);
-      }
-    } catch (err: any) {
-      console.error("Failed to save settings", err);
-      alert(`Failed to save settings: ${err.message}`);
-      throw err;
+      const parsedConfig = parseMcpConfigOrNotify();
+      if (!parsedConfig) return;
+      await putProjectSettings({ mcpConfig: parsedConfig, driveFolderId, selectedTools, enabledMcpServers });
+    } catch (err) {
+      handleApiError(err, (message) => notify(message), triggerSignIn);
     } finally {
       setIsSavingSpecs(false);
     }
@@ -613,17 +576,14 @@ export default function ProjectPage() {
   const handleFetchTools = async () => {
     setToolsLoading(true);
     try {
-      await handleSaveSettings();
-      const res = await fetch(`/api/projects/${projectId}/tools`);
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || `Server responded with status ${res.status}`);
-      }
+      const parsedConfig = parseMcpConfigOrNotify();
+      if (!parsedConfig) return;
+      await putProjectSettings({ mcpConfig: parsedConfig, driveFolderId, selectedTools, enabledMcpServers });
+      const res = await apiFetch(`/api/projects/${projectId}/tools`);
       const data = await res.json();
       if (data.tools) setAvailableTools(data.tools);
-    } catch (err: any) {
-      console.error("Failed to fetch tools", err);
-      alert(`Failed to fetch tools: ${err.message}`);
+    } catch (err) {
+      handleApiError(err, (message) => notify(message), triggerSignIn);
     } finally {
       setToolsLoading(false);
     }
@@ -632,16 +592,8 @@ export default function ProjectPage() {
   const handleSyncDrive = async () => {
     setIsSyncing(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/sync`, { method: 'POST' });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || `Server responded with status ${res.status}`);
-      }
-      const pRes = await fetch(`/api/projects/${projectId}`);
-      if (!pRes.ok) {
-        const data = await pRes.json().catch(() => ({}));
-        throw new Error(data.error || `Server responded with status ${pRes.status}`);
-      }
+      await apiFetch(`/api/projects/${projectId}/sync`, { method: 'POST' });
+      const pRes = await apiFetch(`/api/projects/${projectId}`);
       const data = await pRes.json();
       if (data.project) {
          setSpecs(prev => ({
@@ -652,9 +604,8 @@ export default function ProjectPage() {
            plannedTools: data.project.plannedTools || prev.plannedTools,
          }));
       }
-    } catch (err: any) {
-      console.error("Failed to sync drive", err);
-      alert(`Failed to sync drive: ${err.message}`);
+    } catch (err) {
+      handleApiError(err, (message) => notify(message), triggerSignIn);
     } finally {
       setIsSyncing(false);
     }
@@ -696,12 +647,12 @@ export default function ProjectPage() {
     let mcpServersData = null;
     try {
       mcpServersData = JSON.parse(mcpConfigText);
-    } catch (e) {
+    } catch {
       // ignore
     }
     
     try {
-      const response = await fetch('/api/chat', {
+      const response = await apiFetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -715,14 +666,10 @@ export default function ProjectPage() {
         }),
       });
 
-      if (!response.ok) {
-        throw new Error(`Server returned status ${response.status}`);
-      }
-
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
       if (!reader) {
-        throw new Error('Readable stream not supported');
+        throw new ApiError('server', 'Readable stream not supported');
       }
 
       let agentContent = '';
@@ -771,9 +718,16 @@ export default function ProjectPage() {
         const chatRef = doc(db, 'projects', projectId, 'chats', activeChatId);
         await setDoc(chatRef, { messages: arrayUnion(finalAgentMessage), updatedAt: Date.now() }, { merge: true });
       }
-    } catch (error: any) {
-      console.error('Chat error:', error);
-      const errorMsg: Message = { role: 'agent', content: `Error: ${error.message || 'Failed to connect to the backend API.'}`, timestamp: Date.now() };
+    } catch (error) {
+      console.error(error);
+      const friendlyMessage = error instanceof ApiError
+        ? getUserMessage(error.kind)
+        : getUserMessage('server');
+      if (error instanceof ApiError && error.kind === 'unauthorized') {
+        notify(friendlyMessage);
+        setTimeout(() => triggerSignIn(), 1500);
+      }
+      const errorMsg: Message = { role: 'agent', content: friendlyMessage, timestamp: Date.now() };
       setMessages(prev => [...prev, errorMsg]);
       if (db && activeChatId) {
         const chatRef = doc(db, 'projects', projectId, 'chats', activeChatId);
@@ -878,7 +832,7 @@ export default function ProjectPage() {
                 if (commandMatch) {
                   try {
                     commandObj = JSON.parse(commandMatch[1]);
-                  } catch (e) {}
+                  } catch {}
                 }
  
                 return (
@@ -928,7 +882,7 @@ export default function ProjectPage() {
                             pre({ children }: any) {
                               return <div style={{ marginBottom: '1rem', width: '100%' }}>{children}</div>;
                             },
-                            code({ node, inline, className, children, ...props }: any) {
+                            code({ inline, className, children, ...props }: any) {
                               const match = /language-(\w+)/.exec(className || '');
                               const codeString = String(children).replace(/\n$/, '');
                               
@@ -1522,7 +1476,7 @@ export default function ProjectPage() {
                           let configObj: any = {};
                           try {
                             configObj = JSON.parse(mcpConfigText);
-                          } catch(e) {}
+                          } catch {}
                           
                           const servers = configObj.mcpServers ? Object.keys(configObj.mcpServers) : [];
                           if (servers.length === 0) {
@@ -1575,19 +1529,15 @@ export default function ProjectPage() {
                                             let parsedConfig = {};
                                             try {
                                               parsedConfig = JSON.parse(mcpConfigText);
-                                            } catch (err) {}
-                                            await fetch(`/api/projects/${projectId}`, {
-                                              method: 'PUT',
-                                              headers: { 'Content-Type': 'application/json' },
-                                              body: JSON.stringify({ 
-                                                mcpConfig: parsedConfig, 
-                                                driveFolderId, 
-                                                selectedTools, 
-                                                enabledMcpServers: updatedEnabled 
-                                              })
+                                            } catch {}
+                                            await putProjectSettings({
+                                              mcpConfig: parsedConfig,
+                                              driveFolderId,
+                                              selectedTools,
+                                              enabledMcpServers: updatedEnabled
                                             });
                                           } catch (err) {
-                                            console.error("Failed to auto-save toggled state:", err);
+                                            handleApiError(err, (message) => notify(message), triggerSignIn);
                                           }
                                         }}
                                         style={{ opacity: 0, width: 0, height: 0 }}

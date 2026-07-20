@@ -85,6 +85,7 @@ export async function GET(req: Request) {
     try {
       tokenData = JSON.parse(tokenText);
     } catch (jsonErr) {
+      console.error('[MCP-Callback] Failed to parse token response JSON:', jsonErr);
       throw new Error(`Token exchange response was not valid JSON: ${tokenText}`);
     }
 

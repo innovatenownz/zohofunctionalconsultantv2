@@ -1,6 +1,4 @@
-const { execSync } = require('child_process');
-const fs = require('fs');
-const path = require('path');
+import { execSync } from 'node:child_process';
 
 // Parse CLI flags
 const args = process.argv.slice(2);
@@ -12,7 +10,7 @@ function runCommand(command, errorMessage, exitOnFail = true) {
   try {
     execSync(command, { stdio: 'inherit' });
     return true;
-  } catch (error) {
+  } catch {
     if (exitOnFail) {
       console.error(`\nERROR: ${errorMessage}`);
       process.exit(1);
@@ -27,7 +25,7 @@ function runCommand(command, errorMessage, exitOnFail = true) {
 let branch = '';
 try {
   branch = execSync('git rev-parse --abbrev-ref HEAD').toString().trim();
-} catch (err) {
+} catch {
   console.error('Failed to get current git branch. Make sure you are in a git repository.');
   process.exit(1);
 }
@@ -35,7 +33,7 @@ try {
 let commitSha = 'unknown';
 try {
   commitSha = execSync('git rev-parse --short HEAD').toString().trim().toLowerCase();
-} catch (err) {
+} catch {
   console.warn('Could not determine git commit SHA.');
 }
 
@@ -55,7 +53,7 @@ if (forceEnv) {
   env = 'preprod';
 } else {
   console.error(`Unsupported deployment branch: "${branch}". Deployments are only allowed from "main" (production) or "pre-production" (preprod).`);
-  console.log('To override, use: node scripts/deploy.js --env=preprod or --env=production');
+  console.log('To override, use: node scripts/deploy.mjs --env=preprod or --env=production');
   process.exit(1);
 }
 

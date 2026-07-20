@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { listProjects, createProject, logActivity } from '@/lib/project-service';
 
-export async function GET(req: Request) {
+export async function GET() {
   try {
     const session = await getSession();
     if (!session) {
@@ -34,7 +34,7 @@ export async function POST(req: Request) {
     if (typeof mcpConfig === 'string') {
       try {
         mcpConfigJson = JSON.parse(mcpConfig);
-      } catch (e) {
+      } catch {
         mcpConfigJson = { mcpServers: {} };
       }
     }

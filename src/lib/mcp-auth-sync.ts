@@ -201,32 +201,53 @@ export async function refreshAccessToken(
   });
 
   const responseText = await response.text();
-  console.log(`[MCP-Auth] Token refresh response (${response.status}):`, responseText.slice(0, 200));
-
-  if (!response.ok) {
-    throw new Error(`Token refresh failed (${response.status}): ${responseText}`);
+  let data: Record<string, unknown> | null = null;
+  try {
+    data = JSON.parse(responseText) as Record<string, unknown>;
+  } catch {
+    data = null;
   }
 
-  let data: any;
-  try {
-    data = JSON.parse(responseText);
-  } catch {
-    throw new Error(`Token refresh returned non-JSON response: ${responseText}`);
+  const safeMetadata = {
+    status: response.status,
+    has_access_token: Boolean(data?.access_token),
+    has_refresh_token: Boolean(data?.refresh_token),
+    expires_in: data?.expires_in ?? null,
+    token_type: data?.token_type ?? null,
+    error: data?.error ?? null,
+    error_description: data?.error_description ?? null,
+  };
+  console.log('[MCP-Auth] Token refresh response metadata:', safeMetadata);
+
+  if (!response.ok) {
+    const errorCode = typeof data?.error === 'string' ? data.error : 'unknown_error';
+    const errorDescription = typeof data?.error_description === 'string'
+      ? data.error_description
+      : 'Token refresh request failed';
+    throw new Error(`Token refresh failed (${response.status}): ${errorCode} — ${errorDescription}`);
+  }
+
+  if (!data) {
+    throw new Error('Token refresh returned non-JSON response');
   }
 
   if (data.error) {
-    throw new Error(`Token refresh error from Zoho: ${data.error} — ${data.error_description || ''}`);
+    const errorCode = typeof data.error === 'string' ? data.error : 'unknown_error';
+    const errorDescription = typeof data.error_description === 'string'
+      ? data.error_description
+      : '';
+    throw new Error(`Token refresh error from Zoho: ${errorCode}${errorDescription ? ` — ${errorDescription}` : ''}`);
   }
 
-  if (!data.access_token) {
-    throw new Error(`Token refresh succeeded (HTTP ${response.status}) but no access_token in response: ${responseText}`);
+  if (!data.access_token || typeof data.access_token !== 'string') {
+    throw new Error(`Token refresh succeeded (HTTP ${response.status}) but no access_token in response`);
   }
 
   const updatedAuth: McpServerAuth = {
     ...auth,
     accessToken: data.access_token,
     tokenEndpoint, // save the discovered endpoint for future use
-    ...(data.refresh_token ? { refreshToken: data.refresh_token } : {}),
+    ...(typeof data.refresh_token === 'string' ? { refreshToken: data.refresh_token } : {}),
   };
 
   await saveMcpAuthForServer(projectId, serverName, updatedAuth);

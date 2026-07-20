@@ -39,7 +39,7 @@ export async function POST(
     let parsed: any;
     try {
       parsed = JSON.parse(credentialsJson);
-    } catch (err) {
+    } catch {
       return NextResponse.json({ error: 'Credentials payload is not valid JSON' }, { status: 400 });
     }
 

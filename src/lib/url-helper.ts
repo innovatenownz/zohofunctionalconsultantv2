@@ -12,7 +12,7 @@ function isPrivateIp(ip: string): boolean {
   
   const ipv4Parts = ip.split('.').map(Number);
   if (ipv4Parts.length === 4 && !ipv4Parts.some(isNaN)) {
-    const [p0, p1, p2, p3] = ipv4Parts;
+    const [p0, p1] = ipv4Parts;
     if (p0 === 10) return true;
     if (p0 === 127) return true;
     if (p0 === 169 && p1 === 254) return true;

@@ -69,7 +69,7 @@ const defaultProjectContext = `Initial project setup. Determining CRM parameters
 const defaultPlannedTools = `- ` + "`" + `list_tools` + "`" + ` to confirm Zoho schema access.
 - ` + "`" + `insert_field` + "`" + ` or CRM equivalent actions to deploy fields.`;
 
-let fallbackProjects: Project[] = [
+const fallbackProjects: Project[] = [
   { 
     id: '1', 
     name: "Acme Corp", 
@@ -111,7 +111,7 @@ let fallbackProjects: Project[] = [
   },
 ];
 
-let fallbackActivities: Record<string, ActivityLog[]> = {};
+const fallbackActivities: Record<string, ActivityLog[]> = {};
 
 
 export async function listProjects(): Promise<Project[]> {
@@ -293,7 +293,7 @@ export async function updateProjectMemoryFromExecution(
   if (!project) return;
 
   const memory = project.memorySpec || { activeModules: [], lastUpdated: Date.now() };
-  let modules = memory.activeModules || [];
+  const modules = memory.activeModules || [];
 
   // Parse if Zoho MCP action is related to setting up schema/automations
   // Action names in Zoho MCP typically: create_module, update_module, add_fields, create_workflow, create_blueprint
@@ -373,7 +373,7 @@ export interface ChatSession {
   summary?: string;
 }
 
-let fallbackChats: Record<string, ChatSession[]> = {};
+const fallbackChats: Record<string, ChatSession[]> = {};
 
 export async function migrateExistingChat(projectId: string): Promise<void> {
   const db = getAdminDb();

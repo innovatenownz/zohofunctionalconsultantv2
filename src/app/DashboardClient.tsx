@@ -1,11 +1,18 @@
 'use client';
 
 import { useState } from 'react';
+import { signIn } from 'next-auth/react';
 import { Project } from '@/lib/project-service';
+import { apiFetch, handleApiError } from '@/app/lib/api-client';
 
 export default function DashboardClient({ initialProjects }: { initialProjects: Project[] }) {
   const [projects, setProjects] = useState<Project[]>(initialProjects);
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+
+  const notify = (message: string, type: 'success' | 'error' = 'error') => {
+    setToast({ type, message });
+  };
   const [newProject, setNewProject] = useState({
     name: '',
     description: '',
@@ -33,8 +40,8 @@ export default function DashboardClient({ initialProjects }: { initialProjects: 
       if (newProject.mcpConfigText.trim()) {
         try {
           parsedMcpConfig = JSON.parse(newProject.mcpConfigText);
-        } catch (err) {
-          alert("Invalid JSON in MCP Configuration");
+        } catch {
+          notify('Invalid JSON in MCP Configuration');
           setIsSubmitting(false);
           return;
         }
@@ -45,7 +52,7 @@ export default function DashboardClient({ initialProjects }: { initialProjects: 
         .map(t => t.trim())
         .filter(Boolean);
 
-      const res = await fetch('/api/projects', {
+      const res = await apiFetch('/api/projects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -56,25 +63,19 @@ export default function DashboardClient({ initialProjects }: { initialProjects: 
           tags: tagsArray
         }),
       });
-      if (res.ok) {
-        const data = await res.json();
-        setProjects([data.project, ...projects]);
-        setIsModalOpen(false);
-        setNewProject({
-          name: '',
-          description: '',
-          driveFolderId: '',
-          mcpConfigText: '{\n  "mcpServers": {\n  }\n}',
-          tagsString: ''
-        });
-        window.location.href = `/project/${data.project.id}`;
-      } else {
-        const errData = await res.json();
-        alert(errData.error || 'Failed to create project');
-      }
+      const data = await res.json();
+      setProjects([data.project, ...projects]);
+      setIsModalOpen(false);
+      setNewProject({
+        name: '',
+        description: '',
+        driveFolderId: '',
+        mcpConfigText: '{\n  "mcpServers": {\n  }\n}',
+        tagsString: ''
+      });
+      window.location.href = `/project/${data.project.id}`;
     } catch (error) {
-      console.error(error);
-      alert('An error occurred while creating the project');
+      handleApiError(error, (message) => notify(message), () => signIn('google'));
     } finally {
       setIsSubmitting(false);
     }
@@ -84,21 +85,16 @@ export default function DashboardClient({ initialProjects }: { initialProjects: 
     e.preventDefault();
     e.stopPropagation();
     try {
-      const res = await fetch(`/api/projects/${projectId}`, {
+      await apiFetch(`/api/projects/${projectId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ archived: !currentArchived })
       });
-      if (res.ok) {
-        setProjects(prev =>
-          prev.map(p => (p.id === projectId ? { ...p, archived: !currentArchived } : p))
-        );
-      } else {
-        alert('Failed to update project archive status');
-      }
+      setProjects(prev =>
+        prev.map(p => (p.id === projectId ? { ...p, archived: !currentArchived } : p))
+      );
     } catch (err) {
-      console.error(err);
-      alert('Error updating archive status');
+      handleApiError(err, (message) => notify(message), () => signIn('google'));
     }
   };
 
@@ -130,6 +126,35 @@ export default function DashboardClient({ initialProjects }: { initialProjects: 
 
   return (
     <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+      {toast && (
+        <div style={{
+          padding: '0.75rem 1rem',
+          borderRadius: '8px',
+          backgroundColor: toast.type === 'success' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+          color: toast.type === 'success' ? 'var(--success-color)' : 'var(--danger-color)',
+          border: `1px solid ${toast.type === 'success' ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          animation: 'fade-in 0.3s ease'
+        }}>
+          <span style={{ fontWeight: '500' }}>{toast.message}</span>
+          <button
+            onClick={() => setToast(null)}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'inherit',
+              cursor: 'pointer',
+              fontWeight: 'bold',
+              fontSize: '1rem',
+              marginLeft: '1rem'
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
       {/* Dashboard Title & New Project Button */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
         <div>

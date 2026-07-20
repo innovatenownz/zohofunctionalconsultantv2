@@ -72,7 +72,7 @@ export async function PUT(
       if (typeof mcpConfig === 'string') {
         try {
           mcpConfigJson = JSON.parse(mcpConfig);
-        } catch (e) {
+        } catch {
           mcpConfigJson = { mcpServers: {} };
         }
       }

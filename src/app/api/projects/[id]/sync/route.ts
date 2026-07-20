@@ -5,11 +5,12 @@ import { getProject, updateProject, logActivity } from '@/lib/project-service';
 import { listFolderFiles, extractDocumentText } from '@/lib/google-drive';
 import { GoogleGenAI } from '@google/genai';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 // Dynamically generate Google Application Credentials from Firebase Env Vars
 if (!process.env.GOOGLE_APPLICATION_CREDENTIALS && process.env.FIREBASE_PRIVATE_KEY) {
-  const tmpPath = path.join('/tmp', '.gcp-temp-key.json');
+  const tmpPath = path.join(os.tmpdir(), '.gcp-temp-key.json');
   if (!fs.existsSync(tmpPath)) {
     fs.writeFileSync(tmpPath, JSON.stringify({
       type: "service_account",

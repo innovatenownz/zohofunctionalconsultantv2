@@ -30,7 +30,7 @@ export default function A2UIWidget({ jsonString, commandContext }: A2UIWidgetPro
   try {
     parsed = JSON.parse(jsonString);
     isJson = true;
-  } catch (e) {
+  } catch {
     // Not valid JSON
   }
 
@@ -166,7 +166,7 @@ export default function A2UIWidget({ jsonString, commandContext }: A2UIWidgetPro
       if (typeof item !== 'object' || item === null) {
         return String(item).toLowerCase().includes(searchQuery.toLowerCase());
       }
-      return Object.entries(item).some(([_, val]) =>
+      return Object.values(item).some((val) =>
         String(val).toLowerCase().includes(searchQuery.toLowerCase())
       );
     });

@@ -1,15 +1,34 @@
 import { NextResponse } from 'next/server';
-import { processConsultantRequestStream } from '@/lib/agents/business-analyst';
-import { executeMCPCommand } from '@/lib/agents/mcp-agent';
+import { processConsultantRequestStream, generateChatSummary } from '@/lib/agents/business-analyst';
+import { executeMCPCommand, McpError } from '@/lib/agents/mcp-agent';
 import { listFolderFiles, extractDocumentText } from '@/lib/google-drive';
-import { getProject, logActivity, updateProjectMemoryFromExecution } from '@/lib/project-service';
+import { getProject, logActivity, updateProjectMemoryFromExecution, listChats, updateChat } from '@/lib/project-service';
 import { getSession } from '@/lib/auth';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
+
+function getMcpUserMessage(error: unknown): string {
+  if (!(error instanceof McpError)) {
+    return 'Something went wrong while running that action. Please try again.';
+  }
+
+  switch (error.code) {
+    case 'ZOHO_TOKEN_EXPIRED':
+      return 'Your Zoho connection has expired. Please reconnect it in Settings & Context.';
+    case 'ZOHO_UNREACHABLE':
+      return "We couldn't reach your Zoho connection right now. Please try again shortly.";
+    case 'ZOHO_NOT_CONFIGURED':
+      return 'No Zoho connection is set up for this project. Go to Settings & Context to connect one.';
+    case 'ZOHO_UNKNOWN':
+    default:
+      return 'Something went wrong while running that action. Please try again.';
+  }
+}
 
 // Dynamically generate Google Application Credentials from Firebase Env Vars
 if (!process.env.GOOGLE_APPLICATION_CREDENTIALS && process.env.FIREBASE_PRIVATE_KEY) {
-  const tmpPath = path.join('/tmp', '.gcp-temp-key.json');
+  const tmpPath = path.join(os.tmpdir(), '.gcp-temp-key.json');
   if (!fs.existsSync(tmpPath)) {
     fs.writeFileSync(tmpPath, JSON.stringify({
       type: "service_account",
@@ -83,7 +102,6 @@ export async function POST(req: Request) {
           let additionalContext = '';
           if (projectId && chatId) {
             try {
-              const { listChats } = require('@/lib/project-service');
               const chats = await listChats(projectId);
               const otherChats = chats.filter((c: any) => c.id !== chatId);
               if (otherChats.length > 0) {
@@ -148,7 +166,7 @@ export async function POST(req: Request) {
             if (typeof filteredMcpServers === 'string') {
               try {
                 filteredMcpServers = JSON.parse(filteredMcpServers);
-              } catch (e) {
+              } catch {
                 filteredMcpServers = {};
               }
             }
@@ -186,11 +204,16 @@ export async function POST(req: Request) {
                   await logActivity(projectId, 'mcp_execution', `Executed ${commandJson.action} successfully`, { command: commandJson, result });
                 }
               } catch (e: any) {
-                const errorMsg = `\n\n**❌ Failed to execute MCP Command:** ${e.message}`;
+                console.error('MCP command execution failed:', e);
+                const errorMsg = `\n\n**❌ Failed to execute MCP Command:** ${getMcpUserMessage(e)}`;
                 sendEvent('content', { delta: errorMsg });
 
                 if (projectId) {
-                  await logActivity(projectId, 'mcp_failure', `Failed to execute ${commandJson.action}`, { command: commandJson, error: e.message });
+                  await logActivity(projectId, 'mcp_failure', `Failed to execute ${commandJson.action}`, {
+                    command: commandJson,
+                    error: e instanceof Error ? e.message : 'Unknown MCP error',
+                    code: e instanceof McpError ? e.code : 'ZOHO_UNKNOWN',
+                  });
                 }
               }
             } else {
@@ -203,8 +226,6 @@ export async function POST(req: Request) {
           if (projectId && chatId) {
             (async () => {
               try {
-                const { generateChatSummary } = require('@/lib/agents/business-analyst');
-                const { updateChat } = require('@/lib/project-service');
                 const summary = await generateChatSummary(chatHistory || [], message, finalResponseText);
                 if (summary) {
                   await updateChat(projectId, chatId, { summary });
@@ -220,7 +241,7 @@ export async function POST(req: Request) {
           controller.close();
         } catch (error: any) {
           console.error('Streaming error inside controller:', error);
-          sendEvent('content', { delta: `\n\n**Streaming Error:** ${error.message}` });
+          sendEvent('content', { delta: '\n\n**Streaming Error:** Something went wrong while processing your request. Please try again.' });
           sendEvent('done', {});
           controller.close();
         }
