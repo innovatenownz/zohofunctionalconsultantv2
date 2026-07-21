@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { processConsultantRequestStream, generateChatSummary } from '@/lib/agents/business-analyst';
 import { executeMCPCommand, McpError } from '@/lib/agents/mcp-agent';
 import { listFolderFiles, extractDocumentText } from '@/lib/google-drive';
-import { getProject, logActivity, updateProjectMemoryFromExecution, listChats, updateChat } from '@/lib/project-service';
+import { getProject, logActivity, updateProjectMemoryFromExecution, listChats, updateChat, appendChatMessages } from '@/lib/project-service';
 import { getSession } from '@/lib/auth';
 import fs from 'fs';
 import os from 'os';
@@ -63,6 +63,26 @@ export async function POST(req: Request) {
         };
 
         try {
+          // Persist the incoming user message server-side (Admin SDK bypasses client rules)
+          if (projectId && chatId) {
+            const userMessageToStore: any = {
+              role: 'user',
+              content: message,
+              timestamp: Date.now(),
+              attachments: Array.isArray(attachments)
+                ? attachments.map((a: any) => ({ name: a.name, size: a.size }))
+                : [],
+            };
+            if (session?.user) {
+              userMessageToStore.user = {
+                name: session.user.name,
+                email: session.user.email,
+                image: session.user.image,
+              };
+            }
+            await appendChatMessages(projectId, chatId, [userMessageToStore]);
+          }
+
           let driveContext = '';
 
           // 1. Fetch Context from Google Drive if a folder is linked
@@ -151,6 +171,7 @@ export async function POST(req: Request) {
             finalResponseText += chunkText;
             sendEvent('content', { delta: chunkText });
           }
+          let assistantContent = finalResponseText;
 
           // 3. Extract and Execute MCP Command (A2A handoff)
           const mcpCommandMatch = finalResponseText.match(/```mcp-command\n([\s\S]*?)```/);
@@ -196,6 +217,7 @@ export async function POST(req: Request) {
                 const result = await executeMCPCommand(filteredMcpServers, commandJson, projectId);
                 const successMsg = `\n\n**✅ MCP Command Executed Successfully:**\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\``;
                 sendEvent('content', { delta: successMsg });
+                assistantContent += successMsg;
 
                 if (projectId) {
                   // Update the CRM memory spec based on execution success
@@ -207,6 +229,7 @@ export async function POST(req: Request) {
                 console.error('MCP command execution failed:', e);
                 const errorMsg = `\n\n**❌ Failed to execute MCP Command:** ${getMcpUserMessage(e)}`;
                 sendEvent('content', { delta: errorMsg });
+                assistantContent += errorMsg;
 
                 if (projectId) {
                   await logActivity(projectId, 'mcp_failure', `Failed to execute ${commandJson.action}`, {
@@ -219,7 +242,15 @@ export async function POST(req: Request) {
             } else {
               const warningMsg = `\n\n*(Note: MCP Command generated, but MCP server is not fully configured or enabled for this project)*`;
               sendEvent('content', { delta: warningMsg });
+              assistantContent += warningMsg;
             }
+          }
+
+          // Persist the finalized agent message (server-side; includes any MCP result text shown to the user)
+          if (projectId && chatId) {
+            await appendChatMessages(projectId, chatId, [
+              { role: 'agent', content: assistantContent, timestamp: Date.now() },
+            ]);
           }
 
           // Generate summary in the background and update the chat session document

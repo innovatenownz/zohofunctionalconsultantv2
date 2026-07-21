@@ -1,4 +1,5 @@
 import { getAdminDb } from './firebase-admin';
+import { FieldValue } from 'firebase-admin/firestore';
 
 export interface Project {
   id: string;
@@ -213,6 +214,55 @@ export async function updateProject(projectId: string, updates: Partial<Project>
   }
 }
 
+// Firestore rejects documents deeper than 20 levels or containing cycles.
+// Activity metadata may include arbitrary MCP tool results, so defensively cap
+// depth, break cycles, and truncate oversized strings/arrays before writing.
+const MAX_METADATA_DEPTH = 8;
+const MAX_STRING_LENGTH = 5000;
+const MAX_ARRAY_LENGTH = 100;
+
+export function sanitizeForFirestore(value: any, depth = 0, seen = new WeakSet()): any {
+  if (value === null || value === undefined) return null;
+
+  const t = typeof value;
+  if (t === 'string') {
+    return value.length > MAX_STRING_LENGTH
+      ? value.slice(0, MAX_STRING_LENGTH) + `…[truncated ${value.length - MAX_STRING_LENGTH} chars]`
+      : value;
+  }
+  if (t === 'number' || t === 'boolean') return value;
+  if (t === 'bigint') return value.toString();
+  if (t === 'function' || t === 'symbol') return undefined;
+
+  // Objects/arrays beyond the depth cap are collapsed to a truncated JSON string.
+  if (depth >= MAX_METADATA_DEPTH) {
+    try {
+      const s = JSON.stringify(value);
+      return s && s.length > MAX_STRING_LENGTH ? s.slice(0, MAX_STRING_LENGTH) + '…[truncated]' : s ?? '[unserializable]';
+    } catch {
+      return '[too deep or unserializable]';
+    }
+  }
+
+  if (seen.has(value)) return '[circular]';
+  seen.add(value);
+  try {
+    if (Array.isArray(value)) {
+      const arr = value.slice(0, MAX_ARRAY_LENGTH).map((v) => sanitizeForFirestore(v, depth + 1, seen));
+      if (value.length > MAX_ARRAY_LENGTH) arr.push(`…[${value.length - MAX_ARRAY_LENGTH} more items truncated]`);
+      return arr;
+    }
+    const out: Record<string, any> = {};
+    for (const [k, v] of Object.entries(value)) {
+      const sv = sanitizeForFirestore(v, depth + 1, seen);
+      if (sv !== undefined) out[k] = sv;
+    }
+    return out;
+  } finally {
+    seen.delete(value);
+  }
+}
+
 export async function logActivity(
   projectId: string,
   type: ActivityLog['type'],
@@ -224,7 +274,7 @@ export async function logActivity(
     projectId,
     type,
     description,
-    metadata: metadata || null,
+    metadata: metadata != null ? sanitizeForFirestore(metadata) : null,
     timestamp: Date.now(),
   };
 
@@ -523,6 +573,52 @@ export async function deleteChat(projectId: string, chatId: string): Promise<boo
   } catch (error) {
     console.error(`Error deleting chat ${chatId} for project ${projectId}:`, error);
     return false;
+  }
+}
+
+export async function getChat(projectId: string, chatId: string): Promise<ChatSession | null> {
+  const db = getAdminDb();
+  if (!db) {
+    const chats = fallbackChats[projectId] || [];
+    return chats.find(c => c.id === chatId) || null;
+  }
+  try {
+    const docRef = db.collection('projects').doc(projectId).collection('chats').doc(chatId);
+    const snapshot = await docRef.get();
+    return snapshot.exists ? (snapshot.data() as ChatSession) : null;
+  } catch (error) {
+    console.error(`Error getting chat ${chatId} for project ${projectId}:`, error);
+    return null;
+  }
+}
+
+// Append one or more messages to a chat's transcript using the Admin SDK.
+// Runs server-side only, so it bypasses Firestore security rules entirely.
+export async function appendChatMessages(projectId: string, chatId: string, newMessages: any[]): Promise<void> {
+  if (!newMessages || newMessages.length === 0) return;
+  const sanitized = newMessages.map((m) => sanitizeForFirestore(m));
+  const db = getAdminDb();
+  const updatedAt = Date.now();
+
+  if (!db) {
+    const chats = fallbackChats[projectId] || [];
+    const index = chats.findIndex(c => c.id === chatId);
+    if (index !== -1) {
+      const existing = chats[index];
+      fallbackChats[projectId][index] = {
+        ...existing,
+        messages: [...(existing.messages || []), ...sanitized],
+        updatedAt,
+      };
+    }
+    return;
+  }
+
+  try {
+    const docRef = db.collection('projects').doc(projectId).collection('chats').doc(chatId);
+    await docRef.update({ messages: FieldValue.arrayUnion(...sanitized), updatedAt });
+  } catch (error) {
+    console.error(`Error appending messages to chat ${chatId} for project ${projectId}:`, error);
   }
 }
 

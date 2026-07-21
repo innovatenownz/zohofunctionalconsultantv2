@@ -1,6 +1,27 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
-import { updateChat, deleteChat } from '@/lib/project-service';
+import { getChat, updateChat, deleteChat } from '@/lib/project-service';
+
+export async function GET(
+  req: Request,
+  { params }: { params: Promise<{ id: string; chatId: string }> }
+) {
+  try {
+    const session = await getSession();
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    const { id: projectId, chatId } = await params;
+    const chat = await getChat(projectId, chatId);
+    if (!chat) {
+      return NextResponse.json({ error: 'Chat not found' }, { status: 404 });
+    }
+    return NextResponse.json({ chat });
+  } catch (error: any) {
+    console.error('API GET Chat Error:', error);
+    return NextResponse.json({ error: error.message || 'Failed to fetch chat' }, { status: 500 });
+  }
+}
 
 export async function PUT(
   req: Request,

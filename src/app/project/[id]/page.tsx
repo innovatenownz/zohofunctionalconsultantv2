@@ -3,8 +3,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import { useSession, signIn } from 'next-auth/react';
-import { db } from '@/lib/firebase';
-import { doc, onSnapshot, setDoc, arrayUnion } from 'firebase/firestore';
 import ReactMarkdown from 'react-markdown';
 import A2UIWidget from '@/app/components/A2UIWidget';
 import { apiFetch, ApiError, getUserMessage, handleApiError } from '@/app/lib/api-client';
@@ -210,34 +208,34 @@ export default function ProjectPage() {
     }
   }, [projectId]);
 
-  // Load chat history of the active session from Firestore
+  // Load chat history of the active session from the server (Admin SDK; no direct client DB access)
   useEffect(() => {
-    if (!db || !projectId || !activeChatId) {
-      if (!activeChatId) {
-        setIsChatLoaded(true);
-      }
+    if (!projectId || !activeChatId) {
+      if (!activeChatId) setIsChatLoaded(true);
       return;
     }
-    
+
+    let cancelled = false;
     setIsChatLoaded(false);
-    const chatRef = doc(db, 'projects', projectId, 'chats', activeChatId);
-    const unsubscribe = onSnapshot(chatRef, (snapshot) => {
-      // Ignore database syncs if we are currently streaming chunks locally
-      if (isLoadingRef.current) return;
 
-      if (snapshot.exists()) {
-        const data = snapshot.data();
-        setMessages(data.messages || []);
-      } else {
-        setMessages([]);
+    (async () => {
+      // Don't overwrite locally-streamed messages while a response is in progress
+      if (isLoadingRef.current) {
+        setIsChatLoaded(true);
+        return;
       }
-      setIsChatLoaded(true);
-    }, (error) => {
-      console.error("Error fetching chat:", error);
-      setIsChatLoaded(true);
-    });
+      try {
+        const res = await apiFetch(`/api/projects/${projectId}/chats/${activeChatId}`);
+        const data = await res.json();
+        if (!cancelled) setMessages(data.chat?.messages || []);
+      } catch (err) {
+        if (!cancelled) handleApiError(err, (message) => notify(message), triggerSignIn);
+      } finally {
+        if (!cancelled) setIsChatLoaded(true);
+      }
+    })();
 
-    return () => unsubscribe();
+    return () => { cancelled = true; };
   }, [projectId, activeChatId]);
 
   const handleCreateNewChat = async () => {
@@ -635,15 +633,6 @@ export default function ProjectPage() {
     isLoadingRef.current = true;
     setStreamingStatus('Reading requirements and preparing request...');
     
-    if (db && activeChatId) {
-      try {
-        const chatRef = doc(db, 'projects', projectId, 'chats', activeChatId);
-        await setDoc(chatRef, { messages: arrayUnion(userMessage), updatedAt: Date.now() }, { merge: true });
-      } catch (err) {
-        console.error("Failed to save user message", err);
-      }
-    }
- 
     let mcpServersData = null;
     try {
       mcpServersData = JSON.parse(mcpConfigText);
@@ -712,12 +701,7 @@ export default function ProjectPage() {
         }
       }
 
-      // Save finalized agent message to Firestore
-      const finalAgentMessage: Message = { role: 'agent', content: agentContent, timestamp: Date.now() };
-      if (db && activeChatId) {
-        const chatRef = doc(db, 'projects', projectId, 'chats', activeChatId);
-        await setDoc(chatRef, { messages: arrayUnion(finalAgentMessage), updatedAt: Date.now() }, { merge: true });
-      }
+      // Agent message is persisted server-side by /api/chat (Admin SDK).
     } catch (error) {
       console.error(error);
       const friendlyMessage = error instanceof ApiError
@@ -729,10 +713,6 @@ export default function ProjectPage() {
       }
       const errorMsg: Message = { role: 'agent', content: friendlyMessage, timestamp: Date.now() };
       setMessages(prev => [...prev, errorMsg]);
-      if (db && activeChatId) {
-        const chatRef = doc(db, 'projects', projectId, 'chats', activeChatId);
-        await setDoc(chatRef, { messages: arrayUnion(errorMsg), updatedAt: Date.now() }, { merge: true });
-      }
     } finally {
       setIsLoading(false);
       isLoadingRef.current = false;

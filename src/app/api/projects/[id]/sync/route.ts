@@ -68,9 +68,13 @@ export async function POST(
     );
 
     if (supportedFiles.length === 0) {
+      const serviceAccountEmail = process.env.FIREBASE_CLIENT_EMAIL;
+      const shareHint = serviceAccountEmail
+        ? ` If you expected files here, confirm this folder is shared with ${serviceAccountEmail}.`
+        : ' If you expected files here, confirm this folder is shared with the service account.';
       return NextResponse.json({ 
         success: false, 
-        message: "No supported documents found in the Google Drive folder" 
+        message: `No supported documents found.${shareHint}` 
       }, { status: 400 });
     }
 
