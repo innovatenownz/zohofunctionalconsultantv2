@@ -1,6 +1,9 @@
 import { google } from 'googleapis';
 import { getSession } from '@/lib/auth';
 
+export type { DriveFileMeta } from './drive-folder-unchanged';
+export { isDriveFolderUnchanged } from './drive-folder-unchanged';
+
 export async function getGoogleDriveService() {
   const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
@@ -40,7 +43,7 @@ export async function listFolderFiles(folderId: string) {
     const drive = await getGoogleDriveService();
     const response = await drive.files.list({
       q: `'${folderId}' in parents and trashed = false`,
-      fields: 'files(id, name, mimeType, webViewLink)',
+      fields: 'files(id, name, mimeType, webViewLink, modifiedTime)',
       supportsAllDrives: true,
       includeItemsFromAllDrives: true,
     });

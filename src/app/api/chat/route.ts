@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import { processConsultantRequestStream, generateChatSummary } from '@/lib/agents/business-analyst';
 import { executeMCPCommand, McpError } from '@/lib/agents/mcp-agent';
-import { listFolderFiles, extractDocumentText } from '@/lib/google-drive';
-import { getProject, logActivity, updateProjectMemoryFromExecution, listChats, updateChat, appendChatMessages } from '@/lib/project-service';
+import { listFolderFiles, extractDocumentText, isDriveFolderUnchanged } from '@/lib/google-drive';
+import { getProject, updateProject, logActivity, updateProjectMemoryFromExecution, listChats, updateChat, appendChatMessages } from '@/lib/project-service';
 import { getSession } from '@/lib/auth';
 import fs from 'fs';
 import os from 'os';
@@ -83,41 +83,79 @@ export async function POST(req: Request) {
             await appendChatMessages(projectId, chatId, [userMessageToStore]);
           }
 
+          // Load project early so Drive cache can be consulted before extracting file contents
+          sendEvent('status', { message: 'Loading project specifications & roadmap...' });
+          const project = projectId ? await getProject(projectId) : null;
+
           let driveContext = '';
 
           // 1. Fetch Context from Google Drive if a folder is linked
+          // Always list folder metadata (cheap). Reuse cached driveContext when id+modifiedTime sets match.
           if (driveFolderId) {
             sendEvent('status', { message: 'Reading Google Drive documentation context...' });
             try {
               const files = await listFolderFiles(driveFolderId);
-              const supportedFiles = files.filter(f => f.mimeType === 'application/vnd.google-apps.document' || f.mimeType === 'text/plain' || f.mimeType === 'text/markdown' || f.mimeType === 'application/vnd.google-apps.spreadsheet' || f.mimeType === 'text/csv' || f.mimeType === 'application/json');
-              
-              const extractedTexts = [];
-              for (const doc of supportedFiles) {
-                if (doc.id && doc.mimeType) {
-                  try {
-                    const text = (await extractDocumentText(doc.id, doc.mimeType)) as string;
-                    extractedTexts.push(`--- Document: ${doc.name} ---\n${text.substring(0, 8000)}`); // limit context per document
-                  } catch (err) {
-                    console.warn(`Failed to read document ${doc.name}`, err);
+              const fileMeta = files
+                .filter((f): f is typeof f & { id: string } => Boolean(f.id))
+                .map((f) => ({
+                  id: f.id,
+                  name: f.name || '',
+                  mimeType: f.mimeType || '',
+                  modifiedTime: f.modifiedTime || '',
+                }));
+
+              const cache = project?.driveCache;
+              const cacheHit =
+                Boolean(cache) &&
+                cache!.folderId === driveFolderId &&
+                Boolean(cache!.driveContext) &&
+                isDriveFolderUnchanged(cache!.files || [], fileMeta);
+
+              if (cacheHit) {
+                driveContext = cache!.driveContext;
+                console.log(`[Drive-Cache] Reusing cached driveContext for project ${projectId} (folder unchanged)`);
+              } else {
+                const supportedFiles = files.filter(f => f.mimeType === 'application/vnd.google-apps.document' || f.mimeType === 'text/plain' || f.mimeType === 'text/markdown' || f.mimeType === 'application/vnd.google-apps.spreadsheet' || f.mimeType === 'text/csv' || f.mimeType === 'application/json');
+
+                const extractedTexts = [];
+                for (const doc of supportedFiles) {
+                  if (doc.id && doc.mimeType) {
+                    try {
+                      const text = (await extractDocumentText(doc.id, doc.mimeType)) as string;
+                      extractedTexts.push(`--- Document: ${doc.name} ---\n${text.substring(0, 8000)}`); // limit context per document
+                    } catch (err) {
+                      console.warn(`Failed to read document ${doc.name}`, err);
+                    }
                   }
                 }
-              }
-              
-              if (extractedTexts.length > 0) {
-                driveContext = `[Google Drive Documentation Context]\n${extractedTexts.join('\n\n')}`;
-              } else {
-                driveContext = "[No readable documents found in the linked Google Drive folder]";
+
+                if (extractedTexts.length > 0) {
+                  driveContext = `[Google Drive Documentation Context]\n${extractedTexts.join('\n\n')}`;
+                } else {
+                  driveContext = "[No readable documents found in the linked Google Drive folder]";
+                }
+
+                if (projectId) {
+                  try {
+                    await updateProject(projectId, {
+                      driveCache: {
+                        folderId: driveFolderId,
+                        files: fileMeta,
+                        driveContext,
+                        cachedAt: new Date().toISOString(),
+                      },
+                    });
+                    console.log(`[Drive-Cache] Wrote driveCache for project ${projectId} (${fileMeta.length} files)`);
+                  } catch (cacheErr) {
+                    console.warn('[Drive-Cache] Failed to persist driveCache:', cacheErr);
+                  }
+                }
               }
             } catch (e) {
               console.error("Failed to fetch drive context. Continuing without it.", e);
               driveContext = "[Failed to load Drive Context due to permission or API error]";
             }
           }
-
-          // Fetch project's dynamic requirements specification context & blueprint memory
-          sendEvent('status', { message: 'Loading project specifications & roadmap...' });
-          const project = projectId ? await getProject(projectId) : null;
 
           let additionalContext = '';
           if (projectId && chatId) {

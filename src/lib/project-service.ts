@@ -11,6 +11,13 @@ export interface Project {
   selectedTools?: string[];
   driveFolderId?: string;
   lastSync?: string;
+  /** Cached assembled Drive context for chat, invalidated via file id + modifiedTime. */
+  driveCache?: {
+    folderId: string;
+    files: Array<{ id: string; name: string; mimeType: string; modifiedTime: string }>;
+    driveContext: string;
+    cachedAt: string;
+  };
   createdAt?: string;
   updatedAt?: string;
   enabledMcpServers?: string[];
