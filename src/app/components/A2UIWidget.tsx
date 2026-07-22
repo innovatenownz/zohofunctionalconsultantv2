@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { deriveToolResultChrome, formatToolResultBoolean } from '@/lib/mcp-tool-result-chrome';
 
 export type JSONValue =
   | string
@@ -28,10 +29,16 @@ export default function A2UIWidget({ jsonString, commandContext }: A2UIWidgetPro
   let parsed: any = null;
   let isJson = false;
   try {
-    parsed = JSON.parse(jsonString);
-    isJson = true;
+    // Empty / whitespace-only fences must not crash render — fall back to raw <pre>.
+    const trimmed = typeof jsonString === 'string' ? jsonString.trim() : '';
+    if (trimmed) {
+      parsed = JSON.parse(trimmed);
+      isJson = true;
+    }
   } catch {
-    // Not valid JSON
+    // Malformed JSON — neutral raw fallback below
+    parsed = null;
+    isJson = false;
   }
 
   const handleCopy = async () => {
@@ -61,40 +68,7 @@ export default function A2UIWidget({ jsonString, commandContext }: A2UIWidgetPro
     );
   }
 
-  // Determine friendly titles based on tool/command actions
-  const getFriendlyTitle = () => {
-    if (!commandContext || !commandContext.action) {
-      if (parsed.tools) return "MCP Service: Available Tools";
-      if (parsed.modules) return "Zoho: Modules List";
-      if (parsed.fields) return "Zoho: Fields Schema";
-      return "Integration Result";
-    }
-
-    const action = commandContext.action;
-    
-    // Capitalize action parts
-    const parts = action.split(/[_-]/);
-    const serverName = parts[0]?.toUpperCase() || 'Integration';
-    const actionName = parts.slice(1).join(' ');
-
-    if (action.includes('list_tools')) {
-      return "MCP Connections: Available Tools";
-    }
-    if (action.includes('get_modules') || action.includes('list_modules')) {
-      return `${serverName}: Available Modules`;
-    }
-    if (action.includes('get_fields') || action.includes('list_fields')) {
-      return `${serverName}: Field Configuration Schema`;
-    }
-    if (action.includes('insert') || action.includes('create') || action.includes('add')) {
-      return `${serverName}: Record Created Successfully`;
-    }
-    if (action.includes('search') || action.includes('query') || action.includes('get')) {
-      return `${serverName}: Data Query Results`;
-    }
-
-    return `${serverName}: ${actionName.charAt(0).toUpperCase() + actionName.slice(1)}`;
-  };
+  const chrome = deriveToolResultChrome(parsed, commandContext);
 
   // 1. Render Tools List View
   const renderToolsList = (tools: any[]) => {
@@ -308,10 +282,18 @@ export default function A2UIWidget({ jsonString, commandContext }: A2UIWidgetPro
   const formatValue = (key: string, val: any): React.ReactNode => {
     if (val === null || val === undefined) return '-';
     if (typeof val === 'boolean') {
-      return val ? (
-        <span style={{ color: 'var(--success-color)', fontWeight: '600', display: 'inline-flex', alignItems: 'center', gap: '0.2rem' }}>✓ Yes</span>
-      ) : (
-        <span style={{ color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', gap: '0.2rem' }}>✗ No</span>
+      const { label, tone } = formatToolResultBoolean(key, val);
+      const color =
+        tone === 'error'
+          ? 'var(--error-color, #f87171)'
+          : tone === 'success'
+            ? 'var(--success-color)'
+            : 'var(--text-secondary)';
+      const weight = tone === 'error' || tone === 'success' ? '600' : '400';
+      return (
+        <span style={{ color, fontWeight: weight, display: 'inline-flex', alignItems: 'center', gap: '0.2rem' }}>
+          {label}
+        </span>
       );
     }
     
@@ -516,11 +498,11 @@ export default function A2UIWidget({ jsonString, commandContext }: A2UIWidgetPro
         borderBottom: '1px solid var(--border-color)'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-          <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', borderRadius: '50%', background: 'rgba(16, 185, 129, 0.15)', color: 'var(--success-color)', fontSize: '0.8rem', fontWeight: 'bold' }}>
-            ✓
+          <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', borderRadius: '50%', background: chrome.badgeBackground, color: chrome.badgeColor, fontSize: '0.8rem', fontWeight: 'bold' }}>
+            {chrome.badgeLabel}
           </span>
-          <span style={{ fontWeight: '600', fontSize: '0.95rem', color: 'var(--text-primary)' }}>
-            {getFriendlyTitle()}
+          <span style={{ fontWeight: '600', fontSize: '0.95rem', color: chrome.isToolError ? chrome.badgeColor : 'var(--text-primary)' }}>
+            {chrome.title}
           </span>
         </div>
 

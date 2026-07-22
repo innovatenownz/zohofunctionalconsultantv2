@@ -3,6 +3,7 @@ import { processConsultantRequestStream, generateChatSummary } from '@/lib/agent
 import { executeMCPCommand, McpError } from '@/lib/agents/mcp-agent';
 import { listFolderFiles, extractDocumentText, isDriveFolderUnchanged } from '@/lib/google-drive';
 import { getProject, updateProject, logActivity, updateProjectMemoryFromExecution, listChats, updateChat, appendChatMessages } from '@/lib/project-service';
+import { interpretMcpToolResult } from '@/lib/mcp-tool-result';
 import { getSession } from '@/lib/auth';
 import fs from 'fs';
 import os from 'os';
@@ -253,10 +254,14 @@ export async function POST(req: Request) {
               try {
                 // Send to MCP Agent Client
                 const result = await executeMCPCommand(filteredMcpServers, commandJson, projectId);
+                const { ok, errorSummary } = interpretMcpToolResult(result);
                 const fullJson = JSON.stringify(result, null, 2);
+                const header = ok
+                  ? '**✅ MCP Command Executed Successfully:**'
+                  : `**❌ MCP Command Failed:** ${errorSummary || 'Tool reported an error'}`;
                 // Stream the full JSON so the UI "Developer Details" panel still has the complete payload.
-                const successMsg = `\n\n**✅ MCP Command Executed Successfully:**\n\`\`\`json\n${fullJson}\n\`\`\``;
-                sendEvent('content', { delta: successMsg });
+                const resultMsg = `\n\n${header}\n\`\`\`json\n${fullJson}\n\`\`\``;
+                sendEvent('content', { delta: resultMsg });
                 // Persist/resent-to-Gemini copy is capped so large list_tools (etc.) results don't bloat every future turn.
                 const MAX_PERSISTED_RESULT_CHARS = 2000;
                 let persistedJson = fullJson;
@@ -265,14 +270,21 @@ export async function POST(req: Request) {
                     fullJson.slice(0, MAX_PERSISTED_RESULT_CHARS) +
                     `\n...[truncated, ${fullJson.length} characters total — see Developer Details for full output]`;
                 }
-                const persistedSuccessMsg = `\n\n**✅ MCP Command Executed Successfully:**\n\`\`\`json\n${persistedJson}\n\`\`\``;
-                assistantContent += persistedSuccessMsg;
+                const persistedResultMsg = `\n\n${header}\n\`\`\`json\n${persistedJson}\n\`\`\``;
+                assistantContent += persistedResultMsg;
 
                 if (projectId) {
-                  // Update the CRM memory spec based on execution success
-                  await updateProjectMemoryFromExecution(projectId, commandJson.action, commandJson, true);
-                  // Log successful execution
-                  await logActivity(projectId, 'mcp_execution', `Executed ${commandJson.action} successfully`, { command: commandJson, result });
+                  if (ok) {
+                    await updateProjectMemoryFromExecution(projectId, commandJson.action, commandJson, true);
+                    await logActivity(projectId, 'mcp_execution', `Executed ${commandJson.action} successfully`, { command: commandJson, result });
+                  } else {
+                    await logActivity(projectId, 'mcp_failure', `Tool returned error for ${commandJson.action}: ${errorSummary || 'isError'}`, {
+                      command: commandJson,
+                      result,
+                      error: errorSummary || 'Tool reported an error (isError: true)',
+                      code: 'MCP_TOOL_IS_ERROR',
+                    });
+                  }
                 }
               } catch (e: any) {
                 console.error('MCP command execution failed:', e);
