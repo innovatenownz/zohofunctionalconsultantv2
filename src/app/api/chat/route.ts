@@ -215,9 +215,20 @@ export async function POST(req: Request) {
               try {
                 // Send to MCP Agent Client
                 const result = await executeMCPCommand(filteredMcpServers, commandJson, projectId);
-                const successMsg = `\n\n**✅ MCP Command Executed Successfully:**\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\``;
+                const fullJson = JSON.stringify(result, null, 2);
+                // Stream the full JSON so the UI "Developer Details" panel still has the complete payload.
+                const successMsg = `\n\n**✅ MCP Command Executed Successfully:**\n\`\`\`json\n${fullJson}\n\`\`\``;
                 sendEvent('content', { delta: successMsg });
-                assistantContent += successMsg;
+                // Persist/resent-to-Gemini copy is capped so large list_tools (etc.) results don't bloat every future turn.
+                const MAX_PERSISTED_RESULT_CHARS = 2000;
+                let persistedJson = fullJson;
+                if (fullJson.length > MAX_PERSISTED_RESULT_CHARS) {
+                  persistedJson =
+                    fullJson.slice(0, MAX_PERSISTED_RESULT_CHARS) +
+                    `\n...[truncated, ${fullJson.length} characters total — see Developer Details for full output]`;
+                }
+                const persistedSuccessMsg = `\n\n**✅ MCP Command Executed Successfully:**\n\`\`\`json\n${persistedJson}\n\`\`\``;
+                assistantContent += persistedSuccessMsg;
 
                 if (projectId) {
                   // Update the CRM memory spec based on execution success

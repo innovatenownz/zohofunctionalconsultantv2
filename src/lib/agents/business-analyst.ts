@@ -123,11 +123,18 @@ CURRENT PROJECT REQUIREMENTS & ROADMAP:
 
   // Map history to Gemini format (user/model)
   // Filter out the initial greeting from the agent to avoid API errors if the first message must be user
+  // Cap each historical message so oversized prior tool results (including ones saved before persistence capping) cannot blow the context window.
+  const MAX_HISTORY_MSG_CHARS = 3000;
+  const truncateHistoryContent = (content: string): string => {
+    if (!content || content.length <= MAX_HISTORY_MSG_CHARS) return content;
+    const keep = Math.floor(MAX_HISTORY_MSG_CHARS / 2);
+    return content.slice(0, keep) + '\n...[truncated]...\n' + content.slice(-keep);
+  };
   const formattedHistory = chatHistory
     .filter((msg, idx) => !(idx === 0 && msg.role === 'agent'))
     .map((msg) => ({
       role: msg.role === 'agent' ? 'model' : 'user',
-      parts: [{ text: msg.content }]
+      parts: [{ text: truncateHistoryContent(msg.content) }]
     }));
 
   return {
