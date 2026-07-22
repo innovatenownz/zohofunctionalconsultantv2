@@ -3,6 +3,8 @@
  * Used by A2UIWidget and unit-tested independently.
  */
 
+import { interpretMcpToolResult } from './mcp-tool-result';
+
 export type ToolResultChrome = {
   isToolError: boolean;
   title: string;
@@ -47,11 +49,7 @@ export function deriveToolResultChrome(
   parsed: unknown,
   commandContext?: { action?: string } | null
 ): ToolResultChrome {
-  const isToolError =
-    parsed !== null &&
-    typeof parsed === 'object' &&
-    !Array.isArray(parsed) &&
-    (parsed as Record<string, unknown>).isError === true;
+  const isToolError = !interpretMcpToolResult(parsed).ok;
 
   let title = 'Integration Result';
   try {
