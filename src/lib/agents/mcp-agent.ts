@@ -7,17 +7,27 @@ export type McpErrorCode =
   | 'ZOHO_TOKEN_EXPIRED'
   | 'ZOHO_UNREACHABLE'
   | 'ZOHO_NOT_CONFIGURED'
+  | 'ZOHO_SERVER_NAME_INVALID'
   | 'ZOHO_UNKNOWN';
 
 export class McpError extends Error {
   code: McpErrorCode;
   cause?: unknown;
+  requestedServerName?: string;
+  availableServerNames?: string[];
 
-  constructor(code: McpErrorCode, message: string, cause?: unknown) {
+  constructor(
+    code: McpErrorCode,
+    message: string,
+    cause?: unknown,
+    context?: { requestedServerName?: string; availableServerNames?: string[] }
+  ) {
     super(message);
     this.name = 'McpError';
     this.code = code;
     this.cause = cause;
+    this.requestedServerName = context?.requestedServerName;
+    this.availableServerNames = context?.availableServerNames;
   }
 }
 
@@ -277,7 +287,14 @@ export async function executeMCPCommand(mcpConfig: any, commandData: any, projec
   if (commandData.serverName) {
     targetServers = servers.filter(s => s.name === commandData.serverName);
     if (targetServers.length === 0) {
-      throw new Error(`Target MCP server "${commandData.serverName}" is not configured or enabled.`);
+      const requestedServerName = String(commandData.serverName);
+      const availableServerNames = servers.map((s) => s.name);
+      throw new McpError(
+        'ZOHO_SERVER_NAME_INVALID',
+        `Target MCP server "${requestedServerName}" is not configured or enabled. Available connections: ${availableServerNames.join(', ')}.`,
+        undefined,
+        { requestedServerName, availableServerNames }
+      );
     }
   }
 
