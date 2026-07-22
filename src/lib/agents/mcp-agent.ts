@@ -2,6 +2,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { McpServerAuth } from '../mcp-auth-sync';
+import { resolveToolSchemaLookup, toCompactToolCatalog } from '../mcp-tool-catalog';
 
 export type McpErrorCode =
   | 'ZOHO_TOKEN_EXPIRED'
@@ -279,7 +280,13 @@ export async function executeMCPCommand(mcpConfig: any, commandData: any, projec
   const toolName = commandData.action;
 
   if (toolName === 'list_tools') {
-    return { tools: await listAllMCPTools(mcpConfig, projectId) };
+    const fullTools = await listAllMCPTools(mcpConfig, projectId);
+    return { tools: toCompactToolCatalog(fullTools) };
+  }
+
+  if (toolName === 'get_tool_schema') {
+    const fullTools = await listAllMCPTools(mcpConfig, projectId);
+    return resolveToolSchemaLookup(fullTools, commandData.toolName, commandData.serverName);
   }
 
   // 1. Route by serverName if specified

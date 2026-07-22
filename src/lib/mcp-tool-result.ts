@@ -140,6 +140,17 @@ function isListToolsWrapper(record: Record<string, unknown>): boolean {
   );
 }
 
+function isGetToolSchemaSuccess(record: Record<string, unknown>): boolean {
+  return (
+    'tool' in record &&
+    record.tool !== null &&
+    typeof record.tool === 'object' &&
+    !('content' in record) &&
+    record.isError === undefined &&
+    !('error' in record)
+  );
+}
+
 type FailureDetection = {
   summary: string;
   tier: 1 | 2 | 3;
@@ -202,8 +213,22 @@ export function interpretMcpToolResult(result: unknown): McpToolResultInterpreta
 
   const record = result as Record<string, unknown>;
 
-  if (isListToolsWrapper(record)) {
+  if (isListToolsWrapper(record) || isGetToolSchemaSuccess(record)) {
     return { ok: true };
+  }
+
+  // Schema lookup meta-errors ({ error, code: SCHEMA_LOOKUP_* , isError: true })
+  const schemaCode = record.code;
+  if (
+    typeof schemaCode === 'string' &&
+    schemaCode.startsWith('SCHEMA_LOOKUP_') &&
+    (record.isError === true || typeof record.error === 'string')
+  ) {
+    const errText =
+      typeof record.error === 'string' && record.error.trim()
+        ? record.error.trim()
+        : schemaCode;
+    return { ok: false, errorSummary: truncateSummary(`${schemaCode}: ${errText}`) };
   }
 
   const failure = detectToolFailure(record);

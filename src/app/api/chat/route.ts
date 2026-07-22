@@ -6,6 +6,7 @@ import { evaluateMcpCommandBeforeExecute } from '@/lib/mcp-server-disambiguation
 import { buildConnectedMcpServersPromptLine } from '@/lib/mcp-connection-status';
 import { getProject, updateProject, logActivity, updateProjectMemoryFromExecution, listChats, updateChat, appendChatMessages } from '@/lib/project-service';
 import { interpretMcpToolResult } from '@/lib/mcp-tool-result';
+import { capPersistedResultJson } from '@/lib/mcp-tool-catalog';
 import { getSession } from '@/lib/auth';
 import fs from 'fs';
 import os from 'os';
@@ -305,14 +306,9 @@ export async function POST(req: Request) {
                   // Stream the full JSON so the UI "Developer Details" panel still has the complete payload.
                   const resultMsg = `\n\n${header}\n\`\`\`json\n${fullJson}\n\`\`\``;
                   sendEvent('content', { delta: resultMsg });
-                  // Persist/resent-to-Gemini copy is capped so large list_tools (etc.) results don't bloat every future turn.
-                  const MAX_PERSISTED_RESULT_CHARS = 2000;
-                  let persistedJson = fullJson;
-                  if (fullJson.length > MAX_PERSISTED_RESULT_CHARS) {
-                    persistedJson =
-                      fullJson.slice(0, MAX_PERSISTED_RESULT_CHARS) +
-                      `\n...[truncated, ${fullJson.length} characters total — see Developer Details for full output]`;
-                  }
+                  // Persist/resent-to-Gemini copy is action-aware: compact list_tools / get_tool_schema
+                  // get higher caps; generic Zoho results stay at 2000 chars.
+                  const persistedJson = capPersistedResultJson(actionName, fullJson);
                   const persistedResultMsg = `\n\n${header}\n\`\`\`json\n${persistedJson}\n\`\`\``;
                   assistantContent += persistedResultMsg;
 

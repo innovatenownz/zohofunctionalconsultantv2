@@ -25,6 +25,9 @@ function formatActionTitle(action: string, isToolError: boolean): string {
   if (action.includes('list_tools')) {
     return 'MCP Connections: Available Tools';
   }
+  if (action.includes('get_tool_schema')) {
+    return 'MCP Connections: Tool Schema';
+  }
   if (action.includes('get_modules') || action.includes('list_modules')) {
     return `${serverName}: Available Modules`;
   }
@@ -58,6 +61,7 @@ export function deriveToolResultChrome(
     } else if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       const obj = parsed as Record<string, unknown>;
       if (obj.tools) title = isToolError ? 'MCP Service: Tool Call Failed' : 'MCP Service: Available Tools';
+      else if (obj.tool && typeof obj.tool === 'object') title = isToolError ? 'MCP Service: Tool Schema Failed' : 'MCP Connections: Tool Schema';
       else if (obj.modules) title = isToolError ? 'Zoho: Modules Request Failed' : 'Zoho: Modules List';
       else if (obj.fields) title = isToolError ? 'Zoho: Fields Request Failed' : 'Zoho: Fields Schema';
       else if (isToolError) title = 'Integration Result Failed';

@@ -1,4 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
+import { truncateHistoryContent } from '@/lib/mcp-tool-catalog';
 
 // Lazy-initialize the client so it runs AFTER GOOGLE_APPLICATION_CREDENTIALS
 // has been set up by the API route handler.
@@ -68,7 +69,9 @@ ${memorySpec.activeModules.filter(Boolean).map((mod: any) => {
       tags.
 
       CRITICAL: You do NOT know the available tools on the MCP server in advance.
-      If you need to interact with Zoho or test the connection, you MUST FIRST use the "list_tools" action:
+      Discover tools in two steps:
+
+      1) Compact catalog — call list_tools first when you need to find which tools exist:
       
       \`\`\`mcp-command
       {
@@ -76,17 +79,55 @@ ${memorySpec.activeModules.filter(Boolean).map((mod: any) => {
       }
       \`\`\`
       
-      Wait for the system to return the list of tools. Then, ONLY use the actions (tool names) provided in that list.
-      DO NOT invent tool names like "authenticate" or "create_module" unless you see them in the "list_tools" output.
+      The result is a compact catalog only: each entry has "name", a short "description", and "serverName".
+      It does NOT include full argument schemas.
+
+      2) Full schema — BEFORE you construct arguments for any tool call, if you do not already
+      have that tool's full inputSchema from earlier in THIS conversation, call get_tool_schema:
       
-      When you want to call a tool you discovered, provide its name as the "action" and include its arguments.
-      
-      Example:
       \`\`\`mcp-command
       {
-        "action": "<tool_name_from_list_tools>",
-        "arg1": "value1",
-        "arg2": "value2"
+        "action": "get_tool_schema",
+        "toolName": "<exact_tool_name_from_list_tools>",
+        "serverName": "<exact_connection_name>"
+      }
+      \`\`\`
+      
+      Wait for the schema result. Then build your real tool call to match inputSchema exactly.
+
+      DO NOT invent tool names. ONLY use names returned by list_tools (or already confirmed in this chat).
+
+      How to read a schema:
+      - Mirror the nesting in inputSchema.properties. Zoho tools commonly nest under "body",
+        "query_params", and/or "path_variables" — not flat top-level args.
+      - Honor every key listed in each object's "required" array.
+      - ALSO read each property's "description" text carefully. Some fields are mandatory in prose
+        even when they are omitted from the formal "required" array (example: "profiles" on
+        ZohoCRM_createModules for org_based modules). Treat such description requirements as mandatory.
+
+      Example of a correctly nested tool call (after you have fetched the schema):
+      \`\`\`mcp-command
+      {
+        "action": "ZohoCRM_createModules",
+        "serverName": "Innovate Now CRM",
+        "body": {
+          "modules": [
+            {
+              "api_name": "Example_Module",
+              "singular_label": "Example Module",
+              "plural_label": "Example Modules",
+              "profiles": [{ "id": "<profile_id_from_getProfiles>" }]
+            }
+          ]
+        }
+      }
+      \`\`\`
+
+      Wrong (do not do this — flat/guessed args that ignore inputSchema):
+      \`\`\`mcp-command
+      {
+        "action": "ZohoCRM_createModules",
+        "modules": [{ "api_name": "Example_Module", "display_label": "Example" }]
       }
       \`\`\`
 
@@ -115,6 +156,7 @@ ${memorySpec.activeModules.filter(Boolean).map((mod: any) => {
       4. Re-issue the SAME tool call as before (same "action" and same arguments), adding "serverName" with the chosen name. Output a new mcp-command block and STOP.
 
       Do NOT call list_tools again just to disambiguate if you already have the tool name and arguments from the previous turn.
+      Do NOT call get_tool_schema again for the same tool if its full inputSchema is already present earlier in THIS conversation.
       
       CRITICAL INSTRUCTION REGARDING COMMAND EXECUTION:
       When you generate an \`\`\`mcp-command\`\`\` block, you MUST STOP GENERATING IMMEDIATELY after the closing fence.
@@ -178,13 +220,8 @@ ${driveContext}
 
   // Map history to Gemini format (user/model)
   // Filter out the initial greeting from the agent to avoid API errors if the first message must be user
-  // Cap each historical message so oversized prior tool results (including ones saved before persistence capping) cannot blow the context window.
-  const MAX_HISTORY_MSG_CHARS = 3000;
-  const truncateHistoryContent = (content: string): string => {
-    if (!content || content.length <= MAX_HISTORY_MSG_CHARS) return content;
-    const keep = Math.floor(MAX_HISTORY_MSG_CHARS / 2);
-    return content.slice(0, keep) + '\n...[truncated]...\n' + content.slice(-keep);
-  };
+  // Cap each historical message with action-aware limits so compact list_tools / get_tool_schema
+  // survive, while oversized generic tool results still cannot blow the context window.
   const formattedHistory = chatHistory
     .filter((msg, idx) => !(idx === 0 && msg.role === 'agent'))
     .map((msg) => ({

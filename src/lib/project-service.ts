@@ -227,14 +227,26 @@ export async function updateProject(projectId: string, updates: Partial<Project>
 const MAX_METADATA_DEPTH = 8;
 const MAX_STRING_LENGTH = 5000;
 const MAX_ARRAY_LENGTH = 100;
+/** Chat transcripts need room for compact list_tools (~29KB) and get_tool_schema payloads. */
+export const CHAT_MESSAGE_MAX_STRING_LENGTH = 50_000;
 
-export function sanitizeForFirestore(value: any, depth = 0, seen = new WeakSet()): any {
+export type SanitizeForFirestoreOptions = {
+  maxStringLength?: number;
+};
+
+export function sanitizeForFirestore(
+  value: any,
+  depth = 0,
+  seen = new WeakSet(),
+  options?: SanitizeForFirestoreOptions
+): any {
+  const maxStringLength = options?.maxStringLength ?? MAX_STRING_LENGTH;
   if (value === null || value === undefined) return null;
 
   const t = typeof value;
   if (t === 'string') {
-    return value.length > MAX_STRING_LENGTH
-      ? value.slice(0, MAX_STRING_LENGTH) + `…[truncated ${value.length - MAX_STRING_LENGTH} chars]`
+    return value.length > maxStringLength
+      ? value.slice(0, maxStringLength) + `…[truncated ${value.length - maxStringLength} chars]`
       : value;
   }
   if (t === 'number' || t === 'boolean') return value;
@@ -245,7 +257,7 @@ export function sanitizeForFirestore(value: any, depth = 0, seen = new WeakSet()
   if (depth >= MAX_METADATA_DEPTH) {
     try {
       const s = JSON.stringify(value);
-      return s && s.length > MAX_STRING_LENGTH ? s.slice(0, MAX_STRING_LENGTH) + '…[truncated]' : s ?? '[unserializable]';
+      return s && s.length > maxStringLength ? s.slice(0, maxStringLength) + '…[truncated]' : s ?? '[unserializable]';
     } catch {
       return '[too deep or unserializable]';
     }
@@ -255,13 +267,13 @@ export function sanitizeForFirestore(value: any, depth = 0, seen = new WeakSet()
   seen.add(value);
   try {
     if (Array.isArray(value)) {
-      const arr = value.slice(0, MAX_ARRAY_LENGTH).map((v) => sanitizeForFirestore(v, depth + 1, seen));
+      const arr = value.slice(0, MAX_ARRAY_LENGTH).map((v) => sanitizeForFirestore(v, depth + 1, seen, options));
       if (value.length > MAX_ARRAY_LENGTH) arr.push(`…[${value.length - MAX_ARRAY_LENGTH} more items truncated]`);
       return arr;
     }
     const out: Record<string, any> = {};
     for (const [k, v] of Object.entries(value)) {
-      const sv = sanitizeForFirestore(v, depth + 1, seen);
+      const sv = sanitizeForFirestore(v, depth + 1, seen, options);
       if (sv !== undefined) out[k] = sv;
     }
     return out;
@@ -603,7 +615,9 @@ export async function getChat(projectId: string, chatId: string): Promise<ChatSe
 // Runs server-side only, so it bypasses Firestore security rules entirely.
 export async function appendChatMessages(projectId: string, chatId: string, newMessages: any[]): Promise<void> {
   if (!newMessages || newMessages.length === 0) return;
-  const sanitized = newMessages.map((m) => sanitizeForFirestore(m));
+  const sanitized = newMessages.map((m) =>
+    sanitizeForFirestore(m, 0, new WeakSet(), { maxStringLength: CHAT_MESSAGE_MAX_STRING_LENGTH })
+  );
   const db = getAdminDb();
   const updatedAt = Date.now();
 

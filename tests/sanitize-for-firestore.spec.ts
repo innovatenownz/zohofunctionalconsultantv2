@@ -57,6 +57,18 @@ test.describe('sanitizeForFirestore', () => {
     expect(sanitized.note).toContain('truncated');
   });
 
+  test('chat message path allows compact list_tools sized content (50k)', () => {
+    const big = 'y'.repeat(29000);
+    const sanitized = sanitizeForFirestore(
+      { role: 'agent', content: big },
+      0,
+      new WeakSet(),
+      { maxStringLength: 50_000 }
+    );
+    expect(sanitized.content).toBe(big);
+    expect(sanitized.content).not.toContain('truncated');
+  });
+
   test('truncates oversized arrays and appends a marker', () => {
     const items = Array.from({ length: 500 }, (_, i) => i);
     const sanitized = sanitizeForFirestore({ items });

@@ -73,7 +73,7 @@ export async function evaluateMcpCommandBeforeExecute(
     return { execute: true, command: commandJson };
   }
 
-  if (action === 'list_tools') {
+  if (action === 'list_tools' || action === 'get_tool_schema') {
     return { execute: true, command: commandJson };
   }
 
