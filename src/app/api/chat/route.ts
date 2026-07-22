@@ -7,6 +7,7 @@ import { buildConnectedMcpServersPromptLine } from '@/lib/mcp-connection-status'
 import { getProject, updateProject, logActivity, updateProjectMemoryFromExecution, listChats, updateChat, appendChatMessages } from '@/lib/project-service';
 import { interpretMcpToolResult } from '@/lib/mcp-tool-result';
 import { capPersistedResultJson } from '@/lib/mcp-tool-catalog';
+import { nextStreamDeltaUpToMcpFence, truncateModelTextAtMcpCommand } from '@/lib/mcp-command-fence';
 import { getSession } from '@/lib/auth';
 import fs from 'fs';
 import os from 'os';
@@ -259,12 +260,22 @@ export async function POST(req: Request) {
           );
 
           let finalResponseText = '';
+          let streamedModelLength = 0;
           sendEvent('status', { message: 'Generating recommendations...' });
           for await (const chunk of responseStream) {
             const chunkText = chunk.text || '';
             finalResponseText += chunkText;
-            sendEvent('content', { delta: chunkText });
+            // Stream only up through the first mcp-command closing fence. Anything the
+            // model writes after that (fabricated success/failure narration) is suppressed
+            // here and dropped from assistantContent before the real backend result is appended.
+            const step = nextStreamDeltaUpToMcpFence(streamedModelLength, finalResponseText);
+            if (step.delta) {
+              sendEvent('content', { delta: step.delta });
+            }
+            streamedModelLength = step.streamedLength;
           }
+          // Deterministic truncate even if streaming already suppressed the tail.
+          finalResponseText = truncateModelTextAtMcpCommand(finalResponseText).text;
           let assistantContent = finalResponseText;
 
           // 3. Extract and Execute MCP Command (A2A handoff)
