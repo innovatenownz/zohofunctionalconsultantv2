@@ -3,6 +3,7 @@ import { processConsultantRequestStream, generateChatSummary } from '@/lib/agent
 import { executeMCPCommand, McpError } from '@/lib/agents/mcp-agent';
 import { listFolderFiles, extractDocumentText, isDriveFolderUnchanged } from '@/lib/google-drive';
 import { evaluateMcpCommandBeforeExecute } from '@/lib/mcp-server-disambiguation';
+import { buildConnectedMcpServersPromptLine } from '@/lib/mcp-connection-status';
 import { getProject, updateProject, logActivity, updateProjectMemoryFromExecution, listChats, updateChat, appendChatMessages } from '@/lib/project-service';
 import { interpretMcpToolResult } from '@/lib/mcp-tool-result';
 import { getSession } from '@/lib/auth';
@@ -22,10 +23,47 @@ function getMcpUserMessage(error: unknown): string {
       return "We couldn't reach your Zoho connection right now. Please try again shortly.";
     case 'ZOHO_NOT_CONFIGURED':
       return 'No Zoho connection is set up for this project. Go to Settings & Context to connect one.';
+    case 'ZOHO_SERVER_NAME_INVALID': {
+      const requested = error.requestedServerName ?? 'that connection';
+      const available = error.availableServerNames?.length
+        ? error.availableServerNames.join(', ')
+        : 'none';
+      return `The connection '${requested}' isn't set up for this project. Available connections: ${available}.`;
+    }
     case 'ZOHO_UNKNOWN':
     default:
       return 'Something went wrong while running that action. Please try again.';
   }
+}
+
+function resolveFilteredMcpServers(
+  mcpServers: unknown,
+  project: Awaited<ReturnType<typeof getProject>>
+): Record<string, unknown> {
+  let filteredMcpServers: Record<string, unknown> = (mcpServers as Record<string, unknown>) || {};
+  if (!filteredMcpServers || Object.keys(filteredMcpServers).length === 0) {
+    filteredMcpServers = (project?.mcpConfig || project?.mcpServers || {}) as Record<string, unknown>;
+  }
+  if (typeof filteredMcpServers === 'string') {
+    try {
+      filteredMcpServers = JSON.parse(filteredMcpServers);
+    } catch {
+      filteredMcpServers = {};
+    }
+  }
+  filteredMcpServers = JSON.parse(JSON.stringify(filteredMcpServers || {}));
+
+  if (project?.enabledMcpServers && filteredMcpServers.mcpServers) {
+    const filtered: Record<string, unknown> = {};
+    for (const name of project.enabledMcpServers) {
+      if ((filteredMcpServers.mcpServers as Record<string, unknown>)[name]) {
+        filtered[name] = (filteredMcpServers.mcpServers as Record<string, unknown>)[name];
+      }
+    }
+    filteredMcpServers.mcpServers = filtered;
+  }
+
+  return filteredMcpServers;
 }
 
 // Dynamically generate Google Application Credentials from Firebase Env Vars
@@ -194,6 +232,20 @@ export async function POST(req: Request) {
             }
           }
 
+          const filteredMcpServers = resolveFilteredMcpServers(mcpServers, project);
+          let mcpConnectionContext: string | undefined;
+          if (projectId) {
+            mcpConnectionContext =
+              (await buildConnectedMcpServersPromptLine(
+                projectId,
+                filteredMcpServers,
+                project?.enabledMcpServers
+              )) || undefined;
+            if (mcpConnectionContext) {
+              console.log(`[MCP-Connections] ${mcpConnectionContext}`);
+            }
+          }
+
           // 2. Call Business Analyst Agent Stream
           sendEvent('status', { message: 'Consultant agent is thinking...' });
           const responseStream = await processConsultantRequestStream(
@@ -201,7 +253,8 @@ export async function POST(req: Request) {
             driveContext, 
             chatHistory || [],
             project?.memorySpec,
-            projectContext
+            projectContext,
+            mcpConnectionContext
           );
 
           let finalResponseText = '';
@@ -219,31 +272,6 @@ export async function POST(req: Request) {
           if (mcpCommandMatch) {
             const commandJson = JSON.parse(mcpCommandMatch[1]);
             
-            // Filter config based on project's enabled server connections or fall back to DB
-            let filteredMcpServers = mcpServers;
-            if (!filteredMcpServers || Object.keys(filteredMcpServers).length === 0) {
-              filteredMcpServers = project?.mcpConfig || project?.mcpServers || {};
-            }
-            if (typeof filteredMcpServers === 'string') {
-              try {
-                filteredMcpServers = JSON.parse(filteredMcpServers);
-              } catch {
-                filteredMcpServers = {};
-              }
-            }
-            // Ensure it is a cloned object
-            filteredMcpServers = JSON.parse(JSON.stringify(filteredMcpServers || {}));
-
-            if (project?.enabledMcpServers && filteredMcpServers.mcpServers) {
-              const filtered: Record<string, any> = {};
-              for (const name of project.enabledMcpServers) {
-                if (filteredMcpServers.mcpServers[name]) {
-                  filtered[name] = filteredMcpServers.mcpServers[name];
-                }
-              }
-              filteredMcpServers.mcpServers = filtered;
-            }
-
             const hasMcpServers = filteredMcpServers && (
               (Array.isArray(filteredMcpServers) && filteredMcpServers.length > 0) || 
               (typeof filteredMcpServers === 'object' && !Array.isArray(filteredMcpServers) && Object.keys(filteredMcpServers).length > 0)

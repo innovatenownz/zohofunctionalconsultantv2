@@ -29,7 +29,8 @@ function prepareAgentPrompt(
     crmRoadmap?: string;
     projectContext?: string;
     plannedTools?: string;
-  }
+  },
+  mcpConnectionContext?: string
 ) {
   let memoryPrompt = '';
   if (memorySpec && Array.isArray(memorySpec.activeModules) && memorySpec.activeModules.length > 0) {
@@ -103,7 +104,7 @@ ${memorySpec.activeModules.filter(Boolean).map((mod: any) => {
 
       When the user replies to that question:
       1. Treat their reply as choosing which connection to use (not as a brand-new task), unless they clearly change topic.
-      2. Use ONLY a serverName from the list the system gave. Server names are case-sensitive and must match exactly (e.g. "zohocrm" is not the same as "ZohoCRM").
+      2. Use ONLY a serverName from the list the system gave. Server names are case-sensitive and must match exactly (e.g. "server-a" is not the same as "Server-A").
       3. If the reply is unclear, ambiguous, or does not match any offered name, ask again and list the valid options. Do NOT guess or fuzzy-match.
       4. Re-issue the SAME tool call as before (same "action" and same arguments), adding "serverName" with the chosen name. Output a new mcp-command block and STOP.
 
@@ -127,6 +128,10 @@ CURRENT PROJECT REQUIREMENTS & ROADMAP:
 - Evolving Product & Integration Roadmap: ${projectContext.crmRoadmap || 'None'}
 - Technical Methods Plan: ${projectContext.plannedTools || 'None'}
 `;
+  }
+
+  if (mcpConnectionContext) {
+    systemInstruction += `\n\n${mcpConnectionContext}\n`;
   }
 
   if (memoryPrompt) {
@@ -185,7 +190,8 @@ export async function processConsultantRequest(
     crmRoadmap?: string;
     projectContext?: string;
     plannedTools?: string;
-  }
+  },
+  mcpConnectionContext?: string
 ) {
   try {
     const { systemInstruction, contents } = prepareAgentPrompt(
@@ -193,7 +199,8 @@ export async function processConsultantRequest(
       driveContext, 
       chatHistory, 
       memorySpec, 
-      projectContext
+      projectContext,
+      mcpConnectionContext
     );
 
     const response = await getAI().models.generateContent({
@@ -222,7 +229,8 @@ export async function processConsultantRequestStream(
     crmRoadmap?: string;
     projectContext?: string;
     plannedTools?: string;
-  }
+  },
+  mcpConnectionContext?: string
 ) {
   try {
     const { systemInstruction, contents } = prepareAgentPrompt(
@@ -230,7 +238,8 @@ export async function processConsultantRequestStream(
       driveContext, 
       chatHistory, 
       memorySpec, 
-      projectContext
+      projectContext,
+      mcpConnectionContext
     );
 
     return await getAI().models.generateContentStream({
