@@ -4,6 +4,10 @@ import { saveMcpAuthForServer, refreshAccessToken, discoverTokenEndpoint } from 
 import { getAdminDb } from '@/lib/firebase-admin';
 import { getSession } from '@/lib/auth';
 import { isSafeUrl } from '@/lib/url-helper';
+import {
+  deleteMcpServerFromProject,
+  isMcpServerFullyRemoved,
+} from '@/lib/mcp-server-registry';
 
 export async function POST(
   req: Request,
@@ -153,44 +157,53 @@ export async function DELETE(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const resolvedParams = await params;
-    const projectId = resolvedParams.id;
+    const { id: projectId } = await params;
     const { serverName } = await req.json();
 
     if (!serverName) {
       return NextResponse.json({ error: 'Missing serverName' }, { status: 400 });
     }
 
-    // Verify project exists
-    const project = await getProject(projectId);
-    if (!project) {
+    const result = await deleteMcpServerFromProject(projectId, serverName);
+
+    if (result.errors.includes('Project not found')) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 });
     }
 
-    const db = getAdminDb();
-    if (db) {
-      await db.collection('projects').doc(projectId).collection('mcpCredentials').doc(serverName).delete();
-    }
+    if (!isMcpServerFullyRemoved(result)) {
+      const nothingRemoved =
+        !result.removedFromCredentials &&
+        !result.removedFromMcpConfig &&
+        !result.removedFromEnabledList;
 
-    // Clean up project's mcpConfig
-    const mcpConfig = project.mcpConfig || { mcpServers: {} };
-    if (mcpConfig.mcpServers && mcpConfig.mcpServers[serverName]) {
-      delete mcpConfig.mcpServers[serverName];
-    }
-    
-    // Clean up enabled server list
-    const enabledMcpServers = (project.enabledMcpServers || []).filter(s => s !== serverName);
+      if (nothingRemoved) {
+        return NextResponse.json(
+          { error: `MCP server "${serverName}" was not found on this project` },
+          { status: 404 }
+        );
+      }
 
-    await updateProject(projectId, { mcpConfig, enabledMcpServers });
+      return NextResponse.json(
+        { error: 'MCP server was only partially removed', details: result },
+        { status: 500 }
+      );
+    }
 
     await logActivity(
       projectId,
       'settings_update',
       `MCP Server "${serverName}" configuration and credentials deleted by ${session?.user?.name || 'System User'}`,
-      { serverName }
+      {
+        serverName,
+        removedFromCredentials: result.removedFromCredentials,
+        removedFromMcpConfig: result.removedFromMcpConfig,
+        removedFromEnabledList: result.removedFromEnabledList,
+      }
     );
 
-    return NextResponse.json({ success: true });
+    const project = await getProject(projectId);
+
+    return NextResponse.json({ success: true, result, project });
   } catch (error: any) {
     console.error('API DELETE Credentials Error:', error);
     return NextResponse.json({ error: error.message || 'Internal Server Error' }, { status: 500 });

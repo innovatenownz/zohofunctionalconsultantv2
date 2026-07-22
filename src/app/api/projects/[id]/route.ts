@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { getProject, updateProject, logActivity } from '@/lib/project-service';
+import { listMcpCredentialServerNames } from '@/lib/mcp-server-registry';
 
 export async function GET(
   req: Request,
@@ -20,8 +21,10 @@ export async function GET(
     if (!project) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
+
+    const mcpCredentialServerNames = await listMcpCredentialServerNames(projectId);
     
-    return NextResponse.json({ project });
+    return NextResponse.json({ project: { ...project, mcpCredentialServerNames } });
   } catch (error: any) {
     console.error("API GET Project Details Error:", error);
     return NextResponse.json({ error: error.message || "Failed to fetch project details" }, { status: 500 });

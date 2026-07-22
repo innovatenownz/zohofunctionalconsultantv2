@@ -6,6 +6,7 @@ import { useSession, signIn } from 'next-auth/react';
 import ReactMarkdown from 'react-markdown';
 import A2UIWidget from '@/app/components/A2UIWidget';
 import { apiFetch, ApiError, getUserMessage, handleApiError } from '@/app/lib/api-client';
+import { getUnionMcpServerNames } from '@/lib/mcp-server-names';
 
 type Message = {
   role: 'user' | 'agent';
@@ -49,6 +50,7 @@ export default function ProjectPage() {
   const [mcpConfigText, setMcpConfigText] = useState('{\n  "mcpServers": {\n  }\n}');
   const [driveFolderId, setDriveFolderId] = useState('');
   const [enabledMcpServers, setEnabledMcpServers] = useState<string[]>([]);
+  const [mcpCredentialServerNames, setMcpCredentialServerNames] = useState<string[]>([]);
   const [expandedServer, setExpandedServer] = useState<string | null>(null);
 
   // Add Server Form State
@@ -91,6 +93,51 @@ export default function ProjectPage() {
     });
   };
 
+  const applyProjectMcpState = (project: any) => {
+    if (project.enabledMcpServers) {
+      setEnabledMcpServers(project.enabledMcpServers);
+    }
+    if (Array.isArray(project.mcpCredentialServerNames)) {
+      setMcpCredentialServerNames(project.mcpCredentialServerNames);
+    }
+    if (project.mcpConfig) {
+      try {
+        const configStr =
+          typeof project.mcpConfig === 'string'
+            ? project.mcpConfig
+            : JSON.stringify(project.mcpConfig, null, 2);
+        setMcpConfigText(configStr);
+
+        if (!project.enabledMcpServers && project.mcpConfig.mcpServers) {
+          setEnabledMcpServers(Object.keys(project.mcpConfig.mcpServers));
+        }
+      } catch {
+        /* ignore */
+      }
+    } else if (project.mcpServers && Array.isArray(project.mcpServers)) {
+      const configObj: any = { mcpServers: {} };
+      project.mcpServers.forEach((s: any, i: number) => {
+        configObj.mcpServers[s.name || `server_${i}`] = { url: s.url };
+      });
+      setMcpConfigText(JSON.stringify(configObj, null, 2));
+      if (!project.enabledMcpServers) {
+        setEnabledMcpServers(Object.keys(configObj.mcpServers));
+      }
+    }
+    if (project.selectedTools) {
+      setSelectedTools(project.selectedTools);
+    }
+    if (project.driveFolderId) setDriveFolderId(project.driveFolderId);
+  };
+
+  const refetchProjectMcpState = async () => {
+    const res = await apiFetch(`/api/projects/${projectId}`);
+    const data = await res.json();
+    if (data.project) {
+      applyProjectMcpState(data.project);
+    }
+  };
+
   // Tools State
   const [availableTools, setAvailableTools] = useState<any[]>([]);
   const [selectedTools, setSelectedTools] = useState<string[]>([]);
@@ -131,38 +178,7 @@ export default function ProjectPage() {
             };
             setSpecs(loadedSpecs);
             setEditedSpecs(loadedSpecs);
-            
-            if (data.project.enabledMcpServers) {
-              setEnabledMcpServers(data.project.enabledMcpServers);
-            }
-            
-            if (data.project.mcpConfig) {
-              try {
-                const configStr = typeof data.project.mcpConfig === 'string' ? data.project.mcpConfig : JSON.stringify(data.project.mcpConfig, null, 2);
-                setMcpConfigText(configStr);
-                
-                // If enabledMcpServers is not set yet, default to all configured servers
-                if (!data.project.enabledMcpServers && data.project.mcpConfig.mcpServers) {
-                  setEnabledMcpServers(Object.keys(data.project.mcpConfig.mcpServers));
-                }
-              } catch {}
-            } else if (data.project.mcpServers && Array.isArray(data.project.mcpServers)) {
-              // Convert legacy array to JSON format
-              const configObj: any = { mcpServers: {} };
-              data.project.mcpServers.forEach((s: any, i: number) => {
-                configObj.mcpServers[s.name || `server_${i}`] = { url: s.url };
-              });
-              setMcpConfigText(JSON.stringify(configObj, null, 2));
-              
-              if (!data.project.enabledMcpServers) {
-                setEnabledMcpServers(Object.keys(configObj.mcpServers));
-              }
-            }
-            
-            if (data.project.selectedTools) {
-              setSelectedTools(data.project.selectedTools);
-            }
-            if (data.project.driveFolderId) setDriveFolderId(data.project.driveFolderId);
+            applyProjectMcpState(data.project);
           }
       } catch (err) {
         handleApiError(err, (message) => notify(message), triggerSignIn);
@@ -298,17 +314,19 @@ export default function ProjectPage() {
     if (searchParams) {
       const mcpSuccess = searchParams.get('mcp_success');
       const mcpServer = searchParams.get('server');
-      if (mcpSuccess === 'true' && mcpServer) {
+      if (mcpSuccess === 'true') {
         setOauthToast({
           type: 'success',
-          message: `Successfully connected and authenticated MCP Server: ${mcpServer}`
+          message: mcpServer
+            ? `Successfully connected and authenticated MCP Server: ${mcpServer}`
+            : 'Successfully connected and authenticated MCP Server.',
         });
-        
-        // Clean URL parameters
+
         const newUrl = window.location.pathname;
         window.history.replaceState({}, '', newUrl);
-        
-        // Auto-fetch tools after a short delay
+
+        void refetchProjectMcpState();
+
         setTimeout(() => {
           handleFetchTools();
         }, 1500);
@@ -473,28 +491,40 @@ export default function ProjectPage() {
   const handleEditServer = (serverName: string, serverInfo: any) => {
     setEditingServerName(serverName);
     setShowAddServerForm(true);
-    
+
+    const info = serverInfo || {};
+
     // Determine server type/tab
-    if (serverInfo.url) {
+    if (info.url) {
       setNewServerForm({
         name: serverName,
         transport: 'sse',
-        url: serverInfo.url || '',
+        url: info.url || '',
         command: '',
         args: ''
       });
-      setNewServerConfigJson(JSON.stringify(serverInfo, null, 2));
+      setNewServerConfigJson(JSON.stringify(info, null, 2));
       setAddServerTab('url');
-    } else {
+    } else if (info.command) {
       setAddServerTab('config');
       setNewServerForm({
         name: serverName,
         transport: 'stdio',
         url: '',
-        command: serverInfo.command || '',
-        args: Array.isArray(serverInfo.args) ? serverInfo.args.join(' ') : ''
+        command: info.command || '',
+        args: Array.isArray(info.args) ? info.args.join(' ') : ''
       });
-      setNewServerConfigJson(JSON.stringify(serverInfo, null, 2));
+      setNewServerConfigJson(JSON.stringify(info, null, 2));
+    } else {
+      setAddServerTab('url');
+      setNewServerForm({
+        name: serverName,
+        transport: 'sse',
+        url: '',
+        command: '',
+        args: ''
+      });
+      setNewServerConfigJson('{}');
     }
 
     // Scroll smoothly to the form
@@ -507,39 +537,47 @@ export default function ProjectPage() {
   };
 
   const handleDeleteServer = async (serverName: string) => {
-    if (!confirm(`Are you sure you want to delete MCP Server connection "${serverName}"? This will remove its configuration and any saved credentials.`)) return;
-    
+    if (
+      !confirm(
+        `Are you sure you want to remove the connection "${serverName}"? This cannot be undone.`
+      )
+    ) {
+      return;
+    }
+
     try {
-      await apiFetch(`/api/projects/${projectId}/credentials`, {
+      const res = await apiFetch(`/api/projects/${projectId}/credentials`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ serverName })
+        body: JSON.stringify({ serverName }),
       });
+      const data = await res.json();
 
-      let parsedConfig: any = { mcpServers: {} };
-      try {
-        parsedConfig = JSON.parse(mcpConfigText);
-      } catch {}
-
-      if (parsedConfig.mcpServers && parsedConfig.mcpServers[serverName]) {
-        delete parsedConfig.mcpServers[serverName];
+      if (data.project) {
+        applyProjectMcpState(data.project);
+      } else {
+        await refetchProjectMcpState();
       }
 
-      const updatedConfigText = JSON.stringify(parsedConfig, null, 2);
-      setMcpConfigText(updatedConfigText);
-
-      const updatedEnabled = enabledMcpServers.filter(s => s !== serverName);
-      setEnabledMcpServers(updatedEnabled);
-
-      const toolsToRemove = availableTools.filter(t => t.serverName === serverName).map(t => t.name);
-      const updatedSelectedTools = selectedTools.filter(t => !toolsToRemove.includes(t));
+      const toolsToRemove = availableTools
+        .filter((t) => t.serverName === serverName)
+        .map((t) => t.name);
+      const updatedSelectedTools = selectedTools.filter((t) => !toolsToRemove.includes(t));
       setSelectedTools(updatedSelectedTools);
+
+      if (editingServerName === serverName) {
+        setShowAddServerForm(false);
+        setEditingServerName(null);
+      }
+      if (expandedServer === serverName) {
+        setExpandedServer(null);
+      }
 
       setTimeout(() => {
         handleFetchTools();
       }, 500);
 
-      notify(`Successfully deleted MCP Server "${serverName}".`, 'success');
+      notify(`Successfully removed MCP connection "${serverName}".`, 'success');
     } catch (err) {
       handleApiError(err, (message) => notify(message), triggerSignIn);
     }
@@ -1193,6 +1231,23 @@ export default function ProjectPage() {
                             <h4 style={{ fontSize: '1rem', color: '#fff', margin: 0, fontWeight: '600', letterSpacing: '0.5px' }}>
                               {editingServerName ? `Edit MCP Server: ${editingServerName}` : 'Add MCP Server Connection'}
                             </h4>
+                            {editingServerName && (
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteServer(editingServerName)}
+                                style={{
+                                  color: 'var(--danger-color)',
+                                  fontSize: '0.75rem',
+                                  padding: '0.25rem 0.5rem',
+                                  border: '1px solid var(--danger-color)',
+                                  borderRadius: '6px',
+                                  background: 'transparent',
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                Remove Connection
+                              </button>
+                            )}
                           </div>
 
                           {/* Tab Headers */}
@@ -1458,7 +1513,11 @@ export default function ProjectPage() {
                             configObj = JSON.parse(mcpConfigText);
                           } catch {}
                           
-                          const servers = configObj.mcpServers ? Object.keys(configObj.mcpServers) : [];
+                          const servers = getUnionMcpServerNames(
+                            configObj,
+                            enabledMcpServers,
+                            mcpCredentialServerNames
+                          );
                           if (servers.length === 0) {
                             return (
                               <div style={{ padding: '1rem', border: '1px dashed var(--border-color)', borderRadius: '8px', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
@@ -1469,11 +1528,21 @@ export default function ProjectPage() {
 
                           return servers.map((serverName) => {
                             const isEnabled = enabledMcpServers.includes(serverName);
-                            const serverInfo = configObj.mcpServers[serverName];
+                            const serverInfo = configObj.mcpServers?.[serverName] || null;
+                            const hasStoredCredentials = mcpCredentialServerNames.includes(serverName);
                             const isExpanded = expandedServer === serverName;
                             
                             // Filter available tools that belong to this server
                             const serverTools = availableTools.filter(t => t.serverName === serverName);
+
+                            let connectionSubtitle = 'No configuration saved';
+                            if (serverInfo?.url) {
+                              connectionSubtitle = `SSE: ${serverInfo.url}`;
+                            } else if (serverInfo?.command) {
+                              connectionSubtitle = `Stdio: ${serverInfo.command}`;
+                            } else if (hasStoredCredentials) {
+                              connectionSubtitle = 'OAuth credentials saved (missing mcpConfig entry)';
+                            }
 
                             return (
                               <div key={serverName} style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '8px', overflow: 'hidden' }}>
@@ -1483,7 +1552,7 @@ export default function ProjectPage() {
                                       {serverName.replace('-', ' ').replace(/\b\w/g, c => c.toUpperCase())}
                                     </h4>
                                     <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', fontFamily: 'monospace', marginTop: '0.15rem' }}>
-                                      {serverInfo.url ? `SSE: ${serverInfo.url}` : `Stdio: ${serverInfo.command}`}
+                                      {connectionSubtitle}
                                     </div>
                                   </div>
 
