@@ -82,6 +82,32 @@ ${memorySpec.activeModules.filter(Boolean).map((mod: any) => {
         "arg2": "value2"
       }
       \`\`\`
+
+      Include "serverName" when you know which connection to use (required after the user answers a connection-choice question).
+
+      MULTIPLE MCP CONNECTIONS (SERVER DISAMBIGUATION):
+
+      Some projects have more than one MCP server connection enabled. The same tool name may exist on more than one connection (each listed with a "serverName" in list_tools).
+
+      When calling a tool, you MAY include "serverName" in your mcp-command to target one connection explicitly:
+
+      \`\`\`mcp-command
+      {
+        "action": "<tool_name>",
+        "serverName": "<exact_connection_name_from_list_tools>",
+        ...other tool arguments...
+      }
+      \`\`\`
+
+      If the system appends a message like "Which MCP connection should I use?" listing connection names, that means your previous command was NOT executed yet.
+
+      When the user replies to that question:
+      1. Treat their reply as choosing which connection to use (not as a brand-new task), unless they clearly change topic.
+      2. Use ONLY a serverName from the list the system gave. Server names are case-sensitive and must match exactly (e.g. "zohocrm" is not the same as "ZohoCRM").
+      3. If the reply is unclear, ambiguous, or does not match any offered name, ask again and list the valid options. Do NOT guess or fuzzy-match.
+      4. Re-issue the SAME tool call as before (same "action" and same arguments), adding "serverName" with the chosen name. Output a new mcp-command block and STOP.
+
+      Do NOT call list_tools again just to disambiguate if you already have the tool name and arguments from the previous turn.
       
       CRITICAL INSTRUCTION REGARDING COMMAND EXECUTION:
       When you generate an \`\`\`mcp-command\`\`\` block, you MUST STOP GENERATING IMMEDIATELY.

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { processConsultantRequestStream, generateChatSummary } from '@/lib/agents/business-analyst';
 import { executeMCPCommand, McpError } from '@/lib/agents/mcp-agent';
 import { listFolderFiles, extractDocumentText, isDriveFolderUnchanged } from '@/lib/google-drive';
+import { evaluateMcpCommandBeforeExecute } from '@/lib/mcp-server-disambiguation';
 import { getProject, updateProject, logActivity, updateProjectMemoryFromExecution, listChats, updateChat, appendChatMessages } from '@/lib/project-service';
 import { interpretMcpToolResult } from '@/lib/mcp-tool-result';
 import { getSession } from '@/lib/auth';
@@ -249,55 +250,70 @@ export async function POST(req: Request) {
             );
             
             if (hasMcpServers) {
-              const displayAction = commandJson.action.includes('_') ? commandJson.action.split('_')[0] + ': ' + commandJson.action.split('_').slice(1).join(' ') : commandJson.action;
-              sendEvent('status', { message: `Executing MCP Command: ${displayAction}...` });
-              try {
-                // Send to MCP Agent Client
-                const result = await executeMCPCommand(filteredMcpServers, commandJson, projectId);
-                const { ok, errorSummary } = interpretMcpToolResult(result);
-                const fullJson = JSON.stringify(result, null, 2);
-                const header = ok
-                  ? '**✅ MCP Command Executed Successfully:**'
-                  : `**❌ MCP Command Failed:** ${errorSummary || 'Tool reported an error'}`;
-                // Stream the full JSON so the UI "Developer Details" panel still has the complete payload.
-                const resultMsg = `\n\n${header}\n\`\`\`json\n${fullJson}\n\`\`\``;
-                sendEvent('content', { delta: resultMsg });
-                // Persist/resent-to-Gemini copy is capped so large list_tools (etc.) results don't bloat every future turn.
-                const MAX_PERSISTED_RESULT_CHARS = 2000;
-                let persistedJson = fullJson;
-                if (fullJson.length > MAX_PERSISTED_RESULT_CHARS) {
-                  persistedJson =
-                    fullJson.slice(0, MAX_PERSISTED_RESULT_CHARS) +
-                    `\n...[truncated, ${fullJson.length} characters total — see Developer Details for full output]`;
-                }
-                const persistedResultMsg = `\n\n${header}\n\`\`\`json\n${persistedJson}\n\`\`\``;
-                assistantContent += persistedResultMsg;
+              const execDecision = await evaluateMcpCommandBeforeExecute(
+                filteredMcpServers,
+                commandJson,
+                projectId
+              );
 
-                if (projectId) {
-                  if (ok) {
-                    await updateProjectMemoryFromExecution(projectId, commandJson.action, commandJson, true);
-                    await logActivity(projectId, 'mcp_execution', `Executed ${commandJson.action} successfully`, { command: commandJson, result });
-                  } else {
-                    await logActivity(projectId, 'mcp_failure', `Tool returned error for ${commandJson.action}: ${errorSummary || 'isError'}`, {
-                      command: commandJson,
-                      result,
-                      error: errorSummary || 'Tool reported an error (isError: true)',
-                      code: 'MCP_TOOL_IS_ERROR',
+              if (!execDecision.execute) {
+                sendEvent('content', { delta: execDecision.disambiguationMessage });
+                assistantContent += execDecision.disambiguationMessage;
+              } else {
+                const commandToRun = execDecision.command;
+                const actionName = String(commandToRun.action ?? '');
+                const displayAction = actionName.includes('_')
+                  ? actionName.split('_')[0] + ': ' + actionName.split('_').slice(1).join(' ')
+                  : actionName;
+                sendEvent('status', { message: `Executing MCP Command: ${displayAction}...` });
+                try {
+                  // Send to MCP Agent Client
+                  const result = await executeMCPCommand(filteredMcpServers, commandToRun, projectId);
+                  const { ok, errorSummary } = interpretMcpToolResult(result);
+                  const fullJson = JSON.stringify(result, null, 2);
+                  const header = ok
+                    ? '**✅ MCP Command Executed Successfully:**'
+                    : `**❌ MCP Command Failed:** ${errorSummary || 'Tool reported an error'}`;
+                  // Stream the full JSON so the UI "Developer Details" panel still has the complete payload.
+                  const resultMsg = `\n\n${header}\n\`\`\`json\n${fullJson}\n\`\`\``;
+                  sendEvent('content', { delta: resultMsg });
+                  // Persist/resent-to-Gemini copy is capped so large list_tools (etc.) results don't bloat every future turn.
+                  const MAX_PERSISTED_RESULT_CHARS = 2000;
+                  let persistedJson = fullJson;
+                  if (fullJson.length > MAX_PERSISTED_RESULT_CHARS) {
+                    persistedJson =
+                      fullJson.slice(0, MAX_PERSISTED_RESULT_CHARS) +
+                      `\n...[truncated, ${fullJson.length} characters total — see Developer Details for full output]`;
+                  }
+                  const persistedResultMsg = `\n\n${header}\n\`\`\`json\n${persistedJson}\n\`\`\``;
+                  assistantContent += persistedResultMsg;
+
+                  if (projectId) {
+                    if (ok) {
+                      await updateProjectMemoryFromExecution(projectId, String(commandToRun.action), commandToRun, true);
+                      await logActivity(projectId, 'mcp_execution', `Executed ${commandToRun.action} successfully`, { command: commandToRun, result });
+                    } else {
+                      await logActivity(projectId, 'mcp_failure', `Tool returned error for ${commandToRun.action}: ${errorSummary || 'isError'}`, {
+                        command: commandToRun,
+                        result,
+                        error: errorSummary || 'Tool reported an error (isError: true)',
+                        code: 'MCP_TOOL_IS_ERROR',
+                      });
+                    }
+                  }
+                } catch (e: any) {
+                  console.error('MCP command execution failed:', e);
+                  const errorMsg = `\n\n**❌ Failed to execute MCP Command:** ${getMcpUserMessage(e)}`;
+                  sendEvent('content', { delta: errorMsg });
+                  assistantContent += errorMsg;
+
+                  if (projectId) {
+                    await logActivity(projectId, 'mcp_failure', `Failed to execute ${commandToRun.action}`, {
+                      command: commandToRun,
+                      error: e instanceof Error ? e.message : 'Unknown MCP error',
+                      code: e instanceof McpError ? e.code : 'ZOHO_UNKNOWN',
                     });
                   }
-                }
-              } catch (e: any) {
-                console.error('MCP command execution failed:', e);
-                const errorMsg = `\n\n**❌ Failed to execute MCP Command:** ${getMcpUserMessage(e)}`;
-                sendEvent('content', { delta: errorMsg });
-                assistantContent += errorMsg;
-
-                if (projectId) {
-                  await logActivity(projectId, 'mcp_failure', `Failed to execute ${commandJson.action}`, {
-                    command: commandJson,
-                    error: e instanceof Error ? e.message : 'Unknown MCP error',
-                    code: e instanceof McpError ? e.code : 'ZOHO_UNKNOWN',
-                  });
                 }
               }
             } else {
