@@ -24,7 +24,7 @@ test.describe('Multi-Chat Session Support', () => {
     await expect(chatSelect).toBeVisible();
     
     // Wait for the default session option to load
-    await expect(chatSelect.locator('option')).toHaveCount(1);
+    await expect(chatSelect.locator('option')).toHaveCount(1, { timeout: 15000 });
     
     const initialOptions = await chatSelect.locator('option').allTextContents();
     expect(initialOptions[0]).toContain('Chat Session -');

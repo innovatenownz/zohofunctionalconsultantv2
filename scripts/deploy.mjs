@@ -84,10 +84,8 @@ runCommand('npm run lint', 'Linting returned errors/warnings (ignoring non-fatal
 console.log('\n--- Step 2/3: Compiling Production Build ---');
 runCommand('npm run build', 'Next.js compilation failed.');
 
-// Serial workers for the deploy gate: parallel runs flake on multi-chat / mcp-ondemand
-// under load; everyday local `npx playwright test` keeps default parallelism.
-console.log('\n--- Step 3/3: Running Playwright E2E Tests (serial for deploy stability) ---');
-runCommand('npx playwright test --workers=1', 'Playwright E2E tests failed.');
+console.log('\n--- Step 3/3: Running Playwright E2E Tests ---');
+runCommand('npx playwright test', 'Playwright E2E tests failed.');
 
 // 3. Perform Deployment
 const deployCommand = `gcloud run deploy ${serviceName} --source . --region ${region} --env-vars-file ${configFile} --tag=${revisionTag} --allow-unauthenticated`;
