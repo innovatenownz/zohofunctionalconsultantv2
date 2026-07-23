@@ -886,9 +886,9 @@ export default function ProjectPage() {
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
             <a href="/" style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', textDecoration: 'none' }}>Projects</a>
             <span style={{ color: 'var(--text-secondary)' }}>/</span>
-            <span style={{ fontSize: '0.9rem', fontWeight: '500' }}>Project {projectId}</span>
+            <span style={{ fontSize: '0.9rem', fontWeight: '500' }}>Project {projectName || projectId}</span>
           </div>
-          <h1 style={{ fontSize: '1.75rem', margin: 0 }}>Integration Workspace</h1>
+          <h1 style={{ fontSize: '1.75rem', margin: 0 }}>{projectName || projectId}</h1>
         </div>
         
         <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
@@ -1253,7 +1253,7 @@ export default function ProjectPage() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
                 <h2 style={{ fontSize: '1.25rem', margin: 0, marginBottom: '0.5rem' }}>Integrations & Settings</h2>
                 
-                <details open style={{ background: 'var(--bg-tertiary)', padding: '1.5rem', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
+                <details style={{ background: 'var(--bg-tertiary)', padding: '1.5rem', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
                   <summary style={{ cursor: 'pointer', fontWeight: 'bold', fontSize: '1.1rem', color: 'var(--accent-color)', outline: 'none' }}>
                     ⚙️ View & Edit Settings
                   </summary>
@@ -1872,7 +1872,7 @@ export default function ProjectPage() {
           )}
 
           {activeTab === 'history' && (
-            <div style={{ flex: 1, overflowY: 'auto', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.5rem', minWidth: 0 }}>
               {/* CHAT SESSIONS SELECTOR */}
               <div style={{ 
                 background: 'var(--bg-secondary)', 
@@ -1881,35 +1881,38 @@ export default function ProjectPage() {
                 border: '1px solid var(--border-color)', 
                 display: 'flex', 
                 flexDirection: 'column', 
-                gap: '0.75rem' 
+                gap: '0.75rem',
+                minWidth: 0,
+                maxWidth: '100%',
+                overflow: 'visible',
               }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <h3 style={{ fontSize: '1rem', margin: 0, fontWeight: '600', color: 'var(--text-primary)' }}>Chat Sessions</h3>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
+                  <h3 style={{ fontSize: '1rem', margin: 0, fontWeight: '600', color: 'var(--text-primary)', flexShrink: 0 }}>Chat Sessions</h3>
                   <button 
                     type="button"
                     className="btn btn-secondary" 
                     onClick={handleCreateNewChat}
-                    style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.2rem', height: 'auto' }}
+                    style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.2rem', height: 'auto', flexShrink: 0 }}
                   >
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 12h14M12 5v14"/></svg>
                     New Chat
                   </button>
                 </div>
                 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0, width: '100%' }}>
                   {isEditingChatTitle ? (
-                    <form onSubmit={handleRenameChat} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flex: 1 }}>
+                    <form onSubmit={handleRenameChat} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flex: 1, minWidth: 0 }}>
                       <input 
                         type="text" 
                         className="form-input" 
                         placeholder="New Chat Title"
                         value={editChatTitleVal} 
                         onChange={e => setEditChatTitleVal(e.target.value)} 
-                        style={{ padding: '0.25rem 0.5rem', fontSize: '0.85rem', height: 'auto', flex: 1, margin: 0 }}
+                        style={{ padding: '0.25rem 0.5rem', fontSize: '0.85rem', height: 'auto', flex: 1, minWidth: 0, margin: 0 }}
                         autoFocus
                       />
-                      <button type="submit" className="btn btn-primary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', height: 'auto' }}>Save</button>
-                      <button type="button" className="btn btn-secondary" onClick={() => setIsEditingChatTitle(false)} style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', height: 'auto' }}>Cancel</button>
+                      <button type="submit" className="btn btn-primary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', height: 'auto', flexShrink: 0 }}>Save</button>
+                      <button type="button" className="btn btn-secondary" onClick={() => setIsEditingChatTitle(false)} style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', height: 'auto', flexShrink: 0 }}>Cancel</button>
                     </form>
                   ) : (
                     <>
@@ -1928,8 +1931,11 @@ export default function ProjectPage() {
                           fontSize: '0.85rem',
                           outline: 'none',
                           cursor: 'pointer',
-                          flex: 1
+                          flex: '1 1 auto',
+                          minWidth: '80px',
+                          width: 0,
                         }}
+                        title={chatSessions.find(c => c.id === activeChatId)?.title || ''}
                       >
                         {chatSessions.map(c => (
                           <option key={c.id} value={c.id}>{c.title}</option>
@@ -1945,20 +1951,18 @@ export default function ProjectPage() {
                             setIsEditingChatTitle(true);
                           }
                         }}
-                        style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '6px', color: 'var(--text-secondary)', cursor: 'pointer', padding: '0.45rem', display: 'flex', alignItems: 'center' }}
+                        style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '6px', color: 'var(--text-secondary)', cursor: 'pointer', padding: '0.45rem', display: 'flex', alignItems: 'center', flexShrink: 0 }}
                       >
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
                       </button>
-                      {chatSessions.length > 1 && (
-                        <button 
-                          type="button" 
-                          title="Delete Chat Session"
-                          onClick={handleDeleteChat}
-                          style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '6px', color: 'var(--danger-color)', cursor: 'pointer', padding: '0.45rem', display: 'flex', alignItems: 'center' }}
-                        >
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
-                        </button>
-                      )}
+                      <button 
+                        type="button" 
+                        title="Delete Chat Session"
+                        onClick={handleDeleteChat}
+                        style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '6px', color: 'var(--danger-color)', cursor: 'pointer', padding: '0.45rem', display: 'flex', alignItems: 'center', flexShrink: 0 }}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                      </button>
                     </>
                   )}
                 </div>
@@ -1985,25 +1989,29 @@ export default function ProjectPage() {
                         borderRadius: '8px', 
                         background: 'var(--bg-tertiary)',
                         border: '1px solid var(--border-color)',
-                        borderLeft: `4px solid ${log.type === 'mcp_execution' ? 'var(--success-color)' : log.type === 'mcp_failure' ? 'var(--danger-color)' : 'var(--accent-color)'}`
+                        borderLeft: `4px solid ${log.type === 'mcp_execution' ? 'var(--success-color)' : log.type === 'mcp_failure' ? 'var(--danger-color)' : 'var(--accent-color)'}`,
+                        minWidth: 0,
+                        maxWidth: '100%',
                       }}
                     >
-                      <summary style={{ cursor: 'pointer', outline: 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
-                          <span style={{ fontWeight: '600', fontSize: '0.9rem', color: 'var(--text-primary)' }}>
-                            {log.type === 'mcp_execution' ? '✓ MCP Action Executed' : log.type === 'mcp_failure' ? '✗ MCP Action Failed' : '⚙ Settings Updated'}
-                          </span>
-                          <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                            {log.description.replace(`by ${userStr}`, '').trim()}
-                          </span>
-                        </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.15rem' }}>
-                          <span style={{ fontSize: '0.75rem', fontWeight: '500', color: 'var(--accent-color)' }}>
-                            @{userStr}
-                          </span>
-                          <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
-                            {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </span>
+                      <summary style={{ cursor: 'pointer', outline: 'none' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.75rem', minWidth: 0 }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem', flex: 1, minWidth: '80px', overflow: 'hidden' }}>
+                            <span style={{ fontWeight: '600', fontSize: '0.9rem', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {log.type === 'mcp_execution' ? '✓ MCP Action Executed' : log.type === 'mcp_failure' ? '✗ MCP Action Failed' : '⚙ Settings Updated'}
+                            </span>
+                            <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {log.description.replace(`by ${userStr}`, '').trim()}
+                            </span>
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.15rem', flexShrink: 0 }}>
+                            <span style={{ fontSize: '0.75rem', fontWeight: '500', color: 'var(--accent-color)' }}>
+                              @{userStr}
+                            </span>
+                            <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
+                              {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
                         </div>
                       </summary>
                       

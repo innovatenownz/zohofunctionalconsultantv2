@@ -22,11 +22,16 @@ test.describe('On-Demand MCP Authentication Flow', () => {
     // Wait for the page to be ready
     await page.waitForLoadState('domcontentloaded');
 
-    // Switch to Settings tab first
-    await page.click('text="Settings & Context"');
+    // Switch to Settings tab and wait for its content (History unmounts Settings)
+    await page.getByRole('button', { name: 'Settings & Context' }).click();
+    await expect(page.getByRole('heading', { name: 'Integrations & Settings' })).toBeVisible({ timeout: 15000 });
+
+    // Expand Settings (collapsed by default) so Add Server is visible
+    await page.getByText('View & Edit Settings').click();
+    await expect(page.getByRole('button', { name: '+ Add Server' })).toBeVisible();
 
     // Open the Add Server modal
-    await page.click('text="+ Add Server"');
+    await page.getByRole('button', { name: '+ Add Server' }).click();
 
     // Fill in basic server details
     await page.fill('input[placeholder*="zoho-crm"]', 'zoho-test');
