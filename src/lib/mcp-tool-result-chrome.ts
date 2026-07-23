@@ -77,8 +77,8 @@ export function deriveToolResultChrome(
       isToolError: true,
       title,
       badgeLabel: '✕',
-      badgeColor: 'var(--error-color, #f87171)',
-      badgeBackground: 'rgba(248, 113, 113, 0.15)',
+      badgeColor: 'var(--danger-color)',
+      badgeBackground: 'var(--danger-soft)',
     };
   }
 
@@ -87,7 +87,7 @@ export function deriveToolResultChrome(
     title,
     badgeLabel: '✓',
     badgeColor: 'var(--success-color)',
-    badgeBackground: 'rgba(16, 185, 129, 0.15)',
+    badgeBackground: 'var(--success-soft)',
   };
 }
 

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
-import { getProject, updateProject, logActivity } from '@/lib/project-service';
+import { getProject, updateProject, logActivity, deleteProject } from '@/lib/project-service';
 import { listMcpCredentialServerNames } from '@/lib/mcp-server-registry';
 
 export async function GET(
@@ -96,7 +96,10 @@ export async function PUT(
     if (tags !== undefined) updates.tags = tags;
     
     const updatedProject = await updateProject(projectId, updates);
-    
+    if (!updatedProject) {
+      return NextResponse.json({ error: 'Failed to update project' }, { status: 500 });
+    }
+
     // Log the update activity
     await logActivity(
       projectId,
@@ -115,5 +118,39 @@ export async function PUT(
   } catch (error: any) {
     console.error("API PUT Project Update Error:", error);
     return NextResponse.json({ error: error.message || "Failed to update project" }, { status: 500 });
+  }
+}
+
+export async function DELETE(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const session = await getSession();
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const { id: projectId } = await params;
+    const result = await deleteProject(projectId);
+
+    if (!result.success) {
+      const status = result.error === 'Project not found' ? 404 : 500;
+      return NextResponse.json(
+        {
+          error: `Project delete incomplete. Failed at ${result.failedAt}: ${result.error}. Completed: [${result.completed.join(', ') || 'none'}]. Leftover: [${result.leftover.join(', ')}].`,
+          result,
+        },
+        { status }
+      );
+    }
+
+    return NextResponse.json({ success: true, result });
+  } catch (error: any) {
+    console.error('API DELETE Project Error:', error);
+    return NextResponse.json(
+      { error: error.message || 'Failed to delete project' },
+      { status: 500 }
+    );
   }
 }

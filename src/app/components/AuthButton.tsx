@@ -20,8 +20,8 @@ export default function AuthButton() {
           gap: '0.5rem',
           padding: '0.4rem 0.8rem',
           borderRadius: '8px',
-          background: 'rgba(16, 185, 129, 0.1)',
-          border: '1px solid rgba(16, 185, 129, 0.2)'
+          background: 'var(--success-soft)',
+          border: '1px solid var(--success-border)'
         }}>
           <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--success-color)' }}></div>
           <span style={{ fontSize: '0.8rem', color: 'var(--success-color)' }}>Google Drive Connected</span>
@@ -58,7 +58,7 @@ export default function AuthButton() {
         borderRadius: '8px',
         background: 'var(--accent-gradient)',
         border: 'none',
-        color: 'white',
+        color: 'var(--text-on-accent)',
         cursor: 'pointer',
         fontWeight: '500',
         transition: 'all 0.2s ease'

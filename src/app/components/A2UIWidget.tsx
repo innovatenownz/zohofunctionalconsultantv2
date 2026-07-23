@@ -106,7 +106,7 @@ export default function A2UIWidget({ jsonString, commandContext }: A2UIWidgetPro
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontWeight: '600', color: 'var(--accent-color)', fontFamily: 'monospace', fontSize: '0.95rem' }}>{tool.name}</span>
                   {tool.serverName && (
-                    <span style={{ fontSize: '0.7rem', padding: '0.15rem 0.4rem', background: 'rgba(255,255,255,0.05)', borderRadius: '12px', color: 'var(--text-secondary)' }}>
+                    <span style={{ fontSize: '0.7rem', padding: '0.15rem 0.4rem', background: 'var(--chip-bg)', borderRadius: '12px', color: 'var(--text-secondary)' }}>
                       {tool.serverName}
                     </span>
                   )}
@@ -194,7 +194,7 @@ export default function A2UIWidget({ jsonString, commandContext }: A2UIWidgetPro
                       key={idx} 
                       style={{ 
                         borderBottom: idx < paginatedItems.length - 1 ? '1px solid var(--border-color)' : 'none',
-                        background: idx % 2 === 0 ? 'rgba(255,255,255,0.01)' : 'transparent'
+                        background: idx % 2 === 0 ? 'var(--row-alt)' : 'transparent'
                       }}
                     >
                       {allKeys.slice(0, 5).map((key) => {
@@ -285,7 +285,7 @@ export default function A2UIWidget({ jsonString, commandContext }: A2UIWidgetPro
       const { label, tone } = formatToolResultBoolean(key, val);
       const color =
         tone === 'error'
-          ? 'var(--error-color, #f87171)'
+          ? 'var(--danger-color)'
           : tone === 'success'
             ? 'var(--success-color)'
             : 'var(--text-secondary)';
@@ -395,7 +395,7 @@ export default function A2UIWidget({ jsonString, commandContext }: A2UIWidgetPro
           <details style={{ 
             border: '1px solid var(--border-color)', 
             borderRadius: '8px', 
-            background: 'rgba(0,0,0,0.1)' 
+            background: 'var(--inset-bg)' 
           }}>
             <summary style={{ 
               padding: '0.5rem 1rem', 
@@ -427,7 +427,7 @@ export default function A2UIWidget({ jsonString, commandContext }: A2UIWidgetPro
                       flexDirection: isObj ? 'column' : 'row',
                       justifyContent: isObj ? 'flex-start' : 'space-between',
                       padding: '0.35rem 0',
-                      borderBottom: '1px dashed rgba(255,255,255,0.03)',
+                      borderBottom: '1px dashed var(--border-color)',
                       fontSize: '0.75rem',
                       gap: isObj ? '0.25rem' : '1rem'
                     }}
@@ -494,7 +494,7 @@ export default function A2UIWidget({ jsonString, commandContext }: A2UIWidgetPro
         justifyContent: 'space-between', 
         alignItems: 'center', 
         padding: '0.75rem 1.25rem', 
-        background: 'rgba(255,255,255,0.02)', 
+        background: 'var(--row-alt)', 
         borderBottom: '1px solid var(--border-color)'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
@@ -543,7 +543,7 @@ export default function A2UIWidget({ jsonString, commandContext }: A2UIWidgetPro
       </div>
 
       {/* Collapsed Developer Info Drawer */}
-      <details style={{ borderTop: '1px solid var(--border-color)', background: 'rgba(0,0,0,0.1)' }}>
+      <details style={{ borderTop: '1px solid var(--border-color)', background: 'var(--inset-bg)' }}>
         <summary style={{ padding: '0.6rem 1.25rem', fontSize: '0.75rem', color: 'var(--text-secondary)', cursor: 'pointer', fontWeight: '500', outline: 'none' }}>
           Developer Details (Raw JSON Response)
         </summary>
@@ -557,7 +557,7 @@ export default function A2UIWidget({ jsonString, commandContext }: A2UIWidgetPro
             fontSize: '0.75rem',
             fontFamily: 'monospace',
             border: '1px solid var(--border-color)',
-            color: '#34d399'
+            color: 'var(--success-color)'
           }}>
             <code>{jsonString}</code>
           </pre>

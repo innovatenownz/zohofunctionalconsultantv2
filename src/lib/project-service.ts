@@ -1,5 +1,5 @@
 import { getAdminDb } from './firebase-admin';
-import { FieldValue } from 'firebase-admin/firestore';
+import { FieldValue, type QueryDocumentSnapshot } from 'firebase-admin/firestore';
 
 export interface Project {
   id: string;
@@ -219,6 +219,147 @@ export async function updateProject(projectId: string, updates: Partial<Project>
     console.error(`Error updating project ${projectId}:`, error);
     return null;
   }
+}
+
+export type ProjectDeleteResult = {
+  success: boolean;
+  completed: string[];
+  failedAt?: string;
+  error?: string;
+  leftover: string[];
+};
+
+async function deleteQuerySnapshotDocs(
+  docs: QueryDocumentSnapshot[]
+): Promise<void> {
+  const db = getAdminDb();
+  if (!db || docs.length === 0) return;
+  const BATCH_SIZE = 400;
+  for (let i = 0; i < docs.length; i += BATCH_SIZE) {
+    const batch = db.batch();
+    for (const doc of docs.slice(i, i + BATCH_SIZE)) {
+      batch.delete(doc.ref);
+    }
+    await batch.commit();
+  }
+}
+
+/**
+ * Permanently delete a project and related Firestore data.
+ * Order: mcpCredentials → chats → activities → mcpOAuthStates → legacy chats/{id} → project doc.
+ * On partial failure, returns success:false with completed/leftover lists (no silent orphans).
+ */
+export async function deleteProject(projectId: string): Promise<ProjectDeleteResult> {
+  const completed: string[] = [];
+  const remainingSteps = [
+    'mcpCredentials',
+    'chats',
+    'activities',
+    'mcpOAuthStates',
+    'legacyChatsDoc',
+    'projectDoc',
+  ];
+
+  const markDone = (step: string) => {
+    completed.push(step);
+    const idx = remainingSteps.indexOf(step);
+    if (idx !== -1) remainingSteps.splice(idx, 1);
+  };
+
+  const fail = (failedAt: string, error: string): ProjectDeleteResult => ({
+    success: false,
+    completed: [...completed],
+    failedAt,
+    error,
+    leftover: [...remainingSteps],
+  });
+
+  const db = getAdminDb();
+
+  if (!db) {
+    const index = fallbackProjects.findIndex((p) => p.id === projectId);
+    if (index === -1) {
+      return fail('projectDoc', 'Project not found');
+    }
+    try {
+      delete fallbackChats[projectId];
+      markDone('chats');
+      delete fallbackActivities[projectId]; // Record<string, ActivityLog[]> at project-service.ts:122
+      markDone('activities');
+      markDone('mcpCredentials');
+      markDone('mcpOAuthStates');
+      markDone('legacyChatsDoc');
+      fallbackProjects.splice(index, 1);
+      markDone('projectDoc');
+      return { success: true, completed, leftover: [] };
+    } catch (err) {
+      return fail(
+        'projectDoc',
+        err instanceof Error ? err.message : String(err)
+      );
+    }
+  }
+
+  const projectRef = db.collection('projects').doc(projectId);
+  const projectSnap = await projectRef.get();
+  if (!projectSnap.exists) {
+    return fail('projectDoc', 'Project not found');
+  }
+
+  try {
+    const credSnap = await projectRef.collection('mcpCredentials').get();
+    await deleteQuerySnapshotDocs(credSnap.docs);
+    markDone('mcpCredentials');
+  } catch (err) {
+    return fail('mcpCredentials', err instanceof Error ? err.message : String(err));
+  }
+
+  try {
+    const chatsSnap = await projectRef.collection('chats').get();
+    await deleteQuerySnapshotDocs(chatsSnap.docs);
+    markDone('chats');
+  } catch (err) {
+    return fail('chats', err instanceof Error ? err.message : String(err));
+  }
+
+  try {
+    const activitiesSnap = await projectRef.collection('activities').get();
+    await deleteQuerySnapshotDocs(activitiesSnap.docs);
+    markDone('activities');
+  } catch (err) {
+    return fail('activities', err instanceof Error ? err.message : String(err));
+  }
+
+  try {
+    const oauthSnap = await db
+      .collection('mcpOAuthStates')
+      .where('projectId', '==', projectId)
+      .get();
+    await deleteQuerySnapshotDocs(oauthSnap.docs);
+    markDone('mcpOAuthStates');
+  } catch (err) {
+    return fail('mcpOAuthStates', err instanceof Error ? err.message : String(err));
+  }
+
+  try {
+    const legacyRef = db.collection('chats').doc(projectId);
+    const legacySnap = await legacyRef.get();
+    if (legacySnap.exists) {
+      await legacyRef.delete();
+    }
+    markDone('legacyChatsDoc');
+  } catch (err) {
+    return fail('legacyChatsDoc', err instanceof Error ? err.message : String(err));
+  }
+
+  try {
+    await projectRef.delete();
+    markDone('projectDoc');
+  } catch (err) {
+    return fail('projectDoc', err instanceof Error ? err.message : String(err));
+  }
+
+  return { success: true, completed, leftover: [] };
 }
 
 // Firestore rejects documents deeper than 20 levels or containing cycles.
@@ -514,6 +655,12 @@ export async function createChat(projectId: string, title?: string): Promise<Cha
     month: 'short',
     day: 'numeric'
   });
+
+  const project = await getProject(projectId);
+  const hasDrive = Boolean(project?.driveFolderId?.trim());
+  const greeting = hasDrive
+    ? 'Hello! I am your Zoho Suite & Integration Consultant Agent. I have access to the Google Drive documentation. What would you like to build today?'
+    : 'Hello! I am your Zoho Suite & Integration Consultant Agent. What would you like to build today?';
   
   const newChat: ChatSession = {
     id: Math.random().toString(36).substring(2, 11),
@@ -522,7 +669,7 @@ export async function createChat(projectId: string, title?: string): Promise<Cha
     messages: [
       {
         role: 'agent',
-        content: 'Hello! I am your Zoho Suite & Integration Consultant Agent. I have access to the Google Drive documentation. What would you like to build today?',
+        content: greeting,
         timestamp: Date.now()
       }
     ],

@@ -1,14 +1,35 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { signIn } from 'next-auth/react';
 import { Project } from '@/lib/project-service';
 import { apiFetch, handleApiError } from '@/app/lib/api-client';
 
 export default function DashboardClient({ initialProjects }: { initialProjects: Project[] }) {
+  const router = useRouter();
   const [projects, setProjects] = useState<Project[]>(initialProjects);
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [showDeleteProjectModal, setShowDeleteProjectModal] = useState(false);
+  const [projectPendingDelete, setProjectPendingDelete] = useState<{ id: string; name: string } | null>(null);
+  const [deleteConfirmName, setDeleteConfirmName] = useState('');
+  const [isDeletingProject, setIsDeletingProject] = useState(false);
+
+  useEffect(() => {
+    if (!isModalOpen && !showDeleteProjectModal) return;
+    const main = document.querySelector('.main-content') as HTMLElement | null;
+    if (!main) return;
+    const previousOverflow = main.style.overflowY;
+    const scrollTop = main.scrollTop;
+    main.style.overflowY = 'hidden';
+    // Setting overflow:hidden can reset scrollTop; keep the list where it was.
+    main.scrollTop = scrollTop;
+    return () => {
+      main.style.overflowY = previousOverflow;
+      main.scrollTop = scrollTop;
+    };
+  }, [isModalOpen, showDeleteProjectModal]);
 
   const notify = (message: string, type: 'success' | 'error' = 'error') => {
     setToast({ type, message });
@@ -81,20 +102,55 @@ export default function DashboardClient({ initialProjects }: { initialProjects: 
     }
   };
 
-  const handleToggleArchive = async (projectId: string, currentArchived: boolean, e: React.MouseEvent) => {
+  const handleToggleArchive = async (
+    projectId: string,
+    projectName: string,
+    currentArchived: boolean,
+    e: React.MouseEvent
+  ) => {
     e.preventDefault();
     e.stopPropagation();
+    const nextArchived = !currentArchived;
     try {
       await apiFetch(`/api/projects/${projectId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ archived: !currentArchived })
+        body: JSON.stringify({ archived: nextArchived })
       });
       setProjects(prev =>
-        prev.map(p => (p.id === projectId ? { ...p, archived: !currentArchived } : p))
+        prev.map(p => (p.id === projectId ? { ...p, archived: nextArchived } : p))
+      );
+      notify(
+        nextArchived ? `Archived "${projectName}".` : `Restored "${projectName}".`,
+        'success'
       );
     } catch (err) {
       handleApiError(err, (message) => notify(message), () => signIn('google'));
+    }
+  };
+
+  const openDeleteProjectModal = (project: Project, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setProjectPendingDelete({ id: project.id, name: project.name });
+    setDeleteConfirmName('');
+    setShowDeleteProjectModal(true);
+  };
+
+  const handleDeleteProjectFromCard = async () => {
+    if (!projectPendingDelete || deleteConfirmName !== projectPendingDelete.name) return;
+    setIsDeletingProject(true);
+    try {
+      await apiFetch(`/api/projects/${projectPendingDelete.id}`, { method: 'DELETE' });
+      setProjects((prev) => prev.filter((p) => p.id !== projectPendingDelete.id));
+      setShowDeleteProjectModal(false);
+      setProjectPendingDelete(null);
+      setDeleteConfirmName('');
+      notify(`Deleted "${projectPendingDelete.name}".`, 'success');
+    } catch (err) {
+      handleApiError(err, (message) => notify(message), () => signIn('google'));
+    } finally {
+      setIsDeletingProject(false);
     }
   };
 
@@ -125,14 +181,15 @@ export default function DashboardClient({ initialProjects }: { initialProjects: 
   });
 
   return (
+    <>
     <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
       {toast && (
         <div style={{
           padding: '0.75rem 1rem',
           borderRadius: '8px',
-          backgroundColor: toast.type === 'success' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+          backgroundColor: toast.type === 'success' ? 'var(--success-soft)' : 'var(--danger-soft)',
           color: toast.type === 'success' ? 'var(--success-color)' : 'var(--danger-color)',
-          border: `1px solid ${toast.type === 'success' ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+          border: `1px solid ${toast.type === 'success' ? 'var(--success-border)' : 'var(--danger-border)'}`,
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
@@ -271,7 +328,20 @@ export default function DashboardClient({ initialProjects }: { initialProjects: 
           </div>
         ) : (
           filteredProjects.map(project => (
-            <a href={`/project/${project.id}`} key={project.id} className="card" style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
+            <div
+              key={project.id}
+              className="card"
+              role="link"
+              tabIndex={0}
+              onClick={() => router.push(`/project/${project.id}`)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  router.push(`/project/${project.id}`);
+                }
+              }}
+              style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative', cursor: 'pointer' }}
+            >
               <div className="project-card-header" style={{ marginBottom: '0.75rem' }}>
                 <h3 className="project-card-title" style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--text-primary)' }}>{project.name}</h3>
                 <div style={{ 
@@ -279,7 +349,7 @@ export default function DashboardClient({ initialProjects }: { initialProjects: 
                   borderRadius: '12px', 
                   fontSize: '0.75rem', 
                   fontWeight: '500',
-                  backgroundColor: project.status === 'Active' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                  backgroundColor: project.status === 'Active' ? 'var(--success-soft)' : 'var(--danger-soft)',
                   color: project.status === 'Active' ? 'var(--success-color)' : 'var(--danger-color)'
                 }}>
                   {project.status}
@@ -321,10 +391,11 @@ export default function DashboardClient({ initialProjects }: { initialProjects: 
                   <span>Synced: {project.lastSync || "Never"}</span>
                 </div>
 
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
                 {/* Archive/Unarchive Action */}
                 <button
                   type="button"
-                  onClick={(e) => handleToggleArchive(project.id, !!project.archived, e)}
+                  onClick={(e) => handleToggleArchive(project.id, project.name, !!project.archived, e)}
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
@@ -349,35 +420,71 @@ export default function DashboardClient({ initialProjects }: { initialProjects: 
                   </svg>
                   <span>{project.archived ? "Restore" : "Archive"}</span>
                 </button>
+                <button
+                  type="button"
+                  onClick={(e) => openDeleteProjectModal(project, e)}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.25rem',
+                    fontSize: '0.8rem',
+                    color: 'var(--danger-color)',
+                    cursor: 'pointer',
+                    padding: '0.2rem 0.5rem',
+                    borderRadius: '4px',
+                    border: '1px solid var(--danger-color)',
+                    background: 'var(--danger-soft)',
+                    transition: 'all 0.15s ease'
+                  }}
+                  title="Delete Project Permanently"
+                >
+                  <span>Delete</span>
+                </button>
+                </div>
               </div>
-            </a>
+            </div>
           ))
         )}
       </div>
+    </div>
 
-      {/* New Project Modal */}
-      {isModalOpen && (
-        <div style={{
+    {/* New Project Modal — outside .animate-fade-in so position:fixed is viewport-relative */}
+    {isModalOpen && (
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="new-project-title"
+        style={{
           position: 'fixed',
-          top: 0, left: 0, right: 0, bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.6)',
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
+          inset: 0,
           zIndex: 1000,
-          backdropFilter: 'blur(4px)'
-        }}>
+          background: 'var(--overlay-scrim)',
+          display: 'flex',
+          alignItems: 'safe center',
+          justifyContent: 'center',
+          padding: '1rem',
+          overflowY: 'auto',
+          backdropFilter: 'blur(4px)',
+        }}
+      >
           <div style={{
             backgroundColor: 'var(--bg-secondary)',
-            padding: '2rem',
+            padding: '1.25rem 1.5rem',
             borderRadius: '12px',
             width: '100%',
             maxWidth: '500px',
+            maxHeight: 'calc(100vh - 2rem)',
             border: '1px solid var(--border-color)',
-            boxShadow: '0 20px 25px -5px rgba(0,0,0,0.3)'
+            boxShadow: '0 20px 25px -5px rgba(0,0,0,0.3)',
+            boxSizing: 'border-box',
+            margin: 'auto',
+            display: 'flex',
+            flexDirection: 'column',
+            minHeight: 0,
           }}>
-            <h2 style={{ marginBottom: '1.5rem', fontSize: '1.5rem', fontWeight: 600 }}>Create New Project</h2>
-            <form onSubmit={handleCreateProject}>
+            <h2 id="new-project-title" style={{ margin: '0 0 1rem', fontSize: '1.35rem', fontWeight: 600, flexShrink: 0 }}>Create New Project</h2>
+            <form onSubmit={handleCreateProject} style={{ display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1 }}>
+              <div style={{ overflowY: 'auto', minHeight: 0, flex: 1, paddingRight: '0.25rem' }}>
               <div className="form-group">
                 <label className="form-label">Project Name *</label>
                 <input 
@@ -424,13 +531,14 @@ export default function DashboardClient({ initialProjects }: { initialProjects: 
                 <label className="form-label">MCP Configuration (JSON)</label>
                 <textarea 
                   className="form-input"
-                  rows={4}
+                  rows={3}
                   value={newProject.mcpConfigText}
                   onChange={(e) => setNewProject({...newProject, mcpConfigText: e.target.value})}
                   style={{ fontFamily: 'monospace', fontSize: '0.8rem' }}
                 />
               </div>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', marginTop: '2rem' }}>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)', flexShrink: 0 }}>
                 <button type="button" className="btn btn-secondary" onClick={() => setIsModalOpen(false)}>
                   Cancel
                 </button>
@@ -440,8 +548,84 @@ export default function DashboardClient({ initialProjects }: { initialProjects: 
               </div>
             </form>
           </div>
+      </div>
+    )}
+
+    {/* Delete project modal — outside .animate-fade-in so position:fixed is viewport-relative (same as D12 / Settings delete) */}
+    {showDeleteProjectModal && projectPendingDelete && (
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="dashboard-delete-project-title"
+        style={{
+          position: 'fixed', inset: 0, zIndex: 1000,
+          background: 'var(--overlay-scrim)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: '1rem'
+        }}
+      >
+        <div style={{
+          width: '100%', maxWidth: '440px',
+          background: 'var(--bg-secondary)',
+          border: '1px solid var(--border-color)',
+          borderRadius: '12px',
+          padding: '1.25rem',
+          display: 'flex', flexDirection: 'column', gap: '0.85rem'
+        }}>
+          <h3 id="dashboard-delete-project-title" style={{ margin: 0, color: 'var(--danger-color)' }}>
+            Delete project permanently?
+          </h3>
+          <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+            This permanently removes chats, MCP credentials, and activity logs for
+            <strong> {projectPendingDelete.name}</strong>. Any changes already made in the
+            client&apos;s real Zoho account are <strong>not</strong> rolled back. This cannot be undone.
+          </p>
+          <label style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+            Type the project name <strong>{projectPendingDelete.name}</strong> to confirm
+            <input
+              className="form-input"
+              value={deleteConfirmName}
+              onChange={(e) => setDeleteConfirmName(e.target.value)}
+              placeholder={projectPendingDelete.name}
+              autoFocus
+              style={{ marginTop: '0.35rem', width: '100%' }}
+            />
+          </label>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={isDeletingProject}
+              onClick={() => {
+                setShowDeleteProjectModal(false);
+                setProjectPendingDelete(null);
+                setDeleteConfirmName('');
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={isDeletingProject || deleteConfirmName !== projectPendingDelete.name}
+              onClick={handleDeleteProjectFromCard}
+              style={{
+                color: 'var(--text-on-accent)',
+                background: deleteConfirmName === projectPendingDelete.name ? 'var(--danger-color)' : 'var(--bg-tertiary)',
+                border: 'none',
+                borderRadius: '6px',
+                padding: '0.45rem 0.85rem',
+                fontSize: '0.8rem',
+                fontWeight: 600,
+                cursor: deleteConfirmName === projectPendingDelete.name ? 'pointer' : 'not-allowed',
+                opacity: deleteConfirmName === projectPendingDelete.name ? 1 : 0.5
+              }}
+            >
+              {isDeletingProject ? 'Deleting…' : 'Delete permanently'}
+            </button>
+          </div>
         </div>
-      )}
-    </div>
+      </div>
+    )}
+    </>
   );
 }

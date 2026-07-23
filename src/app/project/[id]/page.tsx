@@ -23,6 +23,7 @@ type Message = {
 export default function ProjectPage() {
   const params = useParams();
   const projectId = params?.id as string || 'default-project';
+  const [projectName, setProjectName] = useState('');
 
   // Chat State
   const [messages, setMessages] = useState<Message[]>([]);
@@ -69,6 +70,9 @@ export default function ProjectPage() {
   const [newServerConfigJson, setNewServerConfigJson] = useState('{\n  "url": ""\n}');
   const [isAddingServer, setIsAddingServer] = useState(false);
   const [oauthToast, setOauthToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [showDeleteProjectModal, setShowDeleteProjectModal] = useState(false);
+  const [deleteConfirmName, setDeleteConfirmName] = useState('');
+  const [isDeletingProject, setIsDeletingProject] = useState(false);
 
   const notify = (message: string, type: 'success' | 'error' = 'error') => {
     setOauthToast({ type, message });
@@ -170,6 +174,7 @@ export default function ProjectPage() {
         const res = await apiFetch(`/api/projects/${projectId}`);
         const data = await res.json();
         if (data.project) {
+            setProjectName(data.project.name || '');
             const loadedSpecs = {
               overallRequirements: data.project.overallRequirements || '',
               crmRoadmap: data.project.crmRoadmap || '',
@@ -583,6 +588,22 @@ export default function ProjectPage() {
     }
   };
 
+  const handleDeleteProject = async () => {
+    if (deleteConfirmName !== projectName || !projectName) return;
+    setIsDeletingProject(true);
+    try {
+      await apiFetch(`/api/projects/${projectId}`, { method: 'DELETE' });
+      window.location.href = '/';
+    } catch (err) {
+      const message =
+        err instanceof ApiError && err.message
+          ? err.message
+          : 'Failed to delete project.';
+      notify(message);
+      setIsDeletingProject(false);
+    }
+  };
+
   const handleSaveSpecs = async () => {
     setIsSavingSpecs(true);
     try {
@@ -759,15 +780,85 @@ export default function ProjectPage() {
   };
 
   return (
-    <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', height: '100vh', padding: '1rem', boxSizing: 'border-box' }}>
+    <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - var(--header-height) - 4rem)', padding: '1rem', boxSizing: 'border-box' }}>
+      {showDeleteProjectModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-project-title"
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1000,
+            background: 'var(--overlay-scrim)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: '1rem'
+          }}
+        >
+          <div style={{
+            width: '100%', maxWidth: '440px',
+            background: 'var(--bg-secondary)',
+            border: '1px solid var(--border-color)',
+            borderRadius: '12px',
+            padding: '1.25rem',
+            display: 'flex', flexDirection: 'column', gap: '0.85rem'
+          }}>
+            <h3 id="delete-project-title" style={{ margin: 0, color: 'var(--danger-color)' }}>
+              Delete project permanently?
+            </h3>
+            <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+              This permanently removes chats, MCP credentials, and activity logs for
+              <strong> {projectName || projectId}</strong>. Any changes already made in the
+              client&apos;s real Zoho account are <strong>not</strong> rolled back. This cannot be undone.
+            </p>
+            <label style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+              Type the project name <strong>{projectName}</strong> to confirm
+              <input
+                className="form-input"
+                value={deleteConfirmName}
+                onChange={(e) => setDeleteConfirmName(e.target.value)}
+                placeholder={projectName || 'Project name'}
+                autoFocus
+                style={{ marginTop: '0.35rem', width: '100%' }}
+              />
+            </label>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={isDeletingProject}
+                onClick={() => setShowDeleteProjectModal(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingProject || deleteConfirmName !== projectName || !projectName}
+                onClick={handleDeleteProject}
+                style={{
+                  color: 'var(--text-on-accent)',
+                  background: deleteConfirmName === projectName && projectName ? 'var(--danger-color)' : 'var(--bg-tertiary)',
+                  border: 'none',
+                  borderRadius: '6px',
+                  padding: '0.45rem 0.85rem',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  cursor: deleteConfirmName === projectName && projectName ? 'pointer' : 'not-allowed',
+                  opacity: deleteConfirmName === projectName && projectName ? 1 : 0.5
+                }}
+              >
+                {isDeletingProject ? 'Deleting…' : 'Delete permanently'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {oauthToast && (
         <div style={{
           padding: '0.75rem 1rem',
           borderRadius: '8px',
           marginBottom: '1rem',
-          backgroundColor: oauthToast.type === 'success' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+          backgroundColor: oauthToast.type === 'success' ? 'var(--success-soft)' : 'var(--danger-soft)',
           color: oauthToast.type === 'success' ? 'var(--success-color)' : 'var(--danger-color)',
-          border: `1px solid ${oauthToast.type === 'success' ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+          border: `1px solid ${oauthToast.type === 'success' ? 'var(--success-border)' : 'var(--danger-border)'}`,
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
@@ -873,7 +964,7 @@ export default function ProjectPage() {
                         padding: msg.role === 'user' ? '0.75rem 1.1rem' : '0.5rem 0', 
                         borderRadius: '12px',
                         background: msg.role === 'user' ? 'var(--accent-gradient)' : 'transparent',
-                        color: msg.role === 'user' ? 'white' : 'var(--text-primary)',
+                        color: msg.role === 'user' ? 'var(--text-on-accent)' : 'var(--text-primary)',
                         borderBottomRightRadius: msg.role === 'user' ? '4px' : '12px',
                         borderBottomLeftRadius: msg.role === 'agent' ? '4px' : '12px',
                         overflowX: 'auto',
@@ -886,9 +977,9 @@ export default function ProjectPage() {
                           {msg.attachments && msg.attachments.length > 0 && (
                             <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginTop: '0.25rem' }}>
                               {msg.attachments.map((file, idx) => (
-                                <div key={idx} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', background: 'rgba(255, 255, 255, 0.15)', padding: '0.2rem 0.5rem', borderRadius: '6px', fontSize: '0.75rem' }}>
+                                <div key={idx} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', background: 'var(--chip-bg)', padding: '0.2rem 0.5rem', borderRadius: '6px', fontSize: '0.75rem' }}>
                                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-                                  <span style={{ color: 'white', maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name}</span>
+                                  <span style={{ color: 'var(--text-on-accent)', maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name}</span>
                                 </div>
                               ))}
                             </div>
@@ -1083,7 +1174,7 @@ export default function ProjectPage() {
                   <div style={{ marginTop: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
                     {/* OVERALL REQUIREMENTS */}
                     <div>
-                      <h3 style={{ fontSize: '1rem', color: 'var(--text-primary)', marginBottom: '0.5rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.25rem' }}>Overall Requirements</h3>
+                      <h3 style={{ fontSize: '1rem', color: 'var(--text-primary)', marginBottom: '0.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.25rem' }}>Overall Requirements</h3>
                       {isEditingSpecs ? (
                         <textarea 
                           className="form-input"
@@ -1101,7 +1192,7 @@ export default function ProjectPage() {
 
                     {/* PRODUCT ROADMAP */}
                     <div>
-                      <h3 style={{ fontSize: '1rem', color: 'var(--text-primary)', marginBottom: '0.5rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.25rem' }}>Product & Integration Roadmap</h3>
+                      <h3 style={{ fontSize: '1rem', color: 'var(--text-primary)', marginBottom: '0.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.25rem' }}>Product & Integration Roadmap</h3>
                       {isEditingSpecs ? (
                         <textarea 
                           className="form-input"
@@ -1119,7 +1210,7 @@ export default function ProjectPage() {
 
                     {/* PROJECT CONTEXT */}
                     <div>
-                      <h3 style={{ fontSize: '1rem', color: 'var(--text-primary)', marginBottom: '0.5rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.25rem' }}>Project Context</h3>
+                      <h3 style={{ fontSize: '1rem', color: 'var(--text-primary)', marginBottom: '0.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.25rem' }}>Project Context</h3>
                       {isEditingSpecs ? (
                         <textarea 
                           className="form-input"
@@ -1137,7 +1228,7 @@ export default function ProjectPage() {
 
                     {/* PLANNED TOOLS */}
                     <div>
-                      <h3 style={{ fontSize: '1rem', color: 'var(--text-primary)', marginBottom: '0.5rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.25rem' }}>Planned Tools</h3>
+                      <h3 style={{ fontSize: '1rem', color: 'var(--text-primary)', marginBottom: '0.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.25rem' }}>Planned Tools</h3>
                       {isEditingSpecs ? (
                         <textarea 
                           className="form-input"
@@ -1209,12 +1300,12 @@ export default function ProjectPage() {
                       {/* ADD SERVER FORM */}
                       {showAddServerForm && (
                         <div id="add-server-form-container" style={{
-                          background: 'rgba(30, 30, 40, 0.65)',
+                          background: 'var(--glass-bg)',
                           backdropFilter: 'blur(12px)',
                           padding: '1.5rem',
                           borderRadius: '12px',
-                          border: '1px solid rgba(255, 255, 255, 0.08)',
-                          boxShadow: '0 8px 32px 0 rgba(0, 0, 0, 0.37)',
+                          border: '1px solid var(--glass-border)',
+                          boxShadow: 'var(--glass-shadow)',
                           marginBottom: '1.5rem',
                           display: 'flex',
                           flexDirection: 'column',
@@ -1228,7 +1319,7 @@ export default function ProjectPage() {
                             }
                           `}</style>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <h4 style={{ fontSize: '1rem', color: '#fff', margin: 0, fontWeight: '600', letterSpacing: '0.5px' }}>
+                            <h4 style={{ fontSize: '1rem', color: 'var(--text-primary)', margin: 0, fontWeight: '600', letterSpacing: '0.5px' }}>
                               {editingServerName ? `Edit MCP Server: ${editingServerName}` : 'Add MCP Server Connection'}
                             </h4>
                             {editingServerName && (
@@ -1253,20 +1344,20 @@ export default function ProjectPage() {
                           {/* Tab Headers */}
                           <div style={{ 
                             display: 'flex', 
-                            background: 'rgba(0, 0, 0, 0.2)', 
+                            background: 'var(--inset-bg)', 
                             padding: '0.25rem', 
                             borderRadius: '8px', 
-                            border: '1px solid rgba(255, 255, 255, 0.05)' 
+                            border: '1px solid var(--border-color)' 
                           }}>
                             <button
                               type="button"
                               style={{
                                 flex: 1,
                                 padding: '0.5rem',
-                                background: addServerTab === 'url' ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
+                                background: addServerTab === 'url' ? 'var(--chip-bg)' : 'transparent',
                                 border: 'none',
                                 borderRadius: '6px',
-                                color: addServerTab === 'url' ? '#fff' : 'rgba(255, 255, 255, 0.5)',
+                                color: addServerTab === 'url' ? 'var(--text-primary)' : 'var(--text-secondary)',
                                 fontWeight: addServerTab === 'url' ? '600' : 'normal',
                                 cursor: 'pointer',
                                 fontSize: '0.75rem',
@@ -1282,10 +1373,10 @@ export default function ProjectPage() {
                               style={{
                                 flex: 1,
                                 padding: '0.5rem',
-                                background: addServerTab === 'json' ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
+                                background: addServerTab === 'json' ? 'var(--chip-bg)' : 'transparent',
                                 border: 'none',
                                 borderRadius: '6px',
-                                color: addServerTab === 'json' ? '#fff' : 'rgba(255, 255, 255, 0.5)',
+                                color: addServerTab === 'json' ? 'var(--text-primary)' : 'var(--text-secondary)',
                                 fontWeight: addServerTab === 'json' ? '600' : 'normal',
                                 cursor: 'pointer',
                                 fontSize: '0.75rem',
@@ -1301,10 +1392,10 @@ export default function ProjectPage() {
                               style={{
                                 flex: 1,
                                 padding: '0.5rem',
-                                background: addServerTab === 'config' ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
+                                background: addServerTab === 'config' ? 'var(--chip-bg)' : 'transparent',
                                 border: 'none',
                                 borderRadius: '6px',
-                                color: addServerTab === 'config' ? '#fff' : 'rgba(255, 255, 255, 0.5)',
+                                color: addServerTab === 'config' ? 'var(--text-primary)' : 'var(--text-secondary)',
                                 fontWeight: addServerTab === 'config' ? '600' : 'normal',
                                 cursor: 'pointer',
                                 fontSize: '0.75rem',
@@ -1319,7 +1410,7 @@ export default function ProjectPage() {
 
                           {/* Common Input: Server Name */}
                           <div className="form-group" style={{ margin: 0 }}>
-                            <label style={{ fontSize: '0.75rem', color: 'rgba(255, 255, 255, 0.6)', marginBottom: '0.25rem', display: 'block' }}>
+                            <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.25rem', display: 'block' }}>
                               Server Identifier / Name
                             </label>
                             <input 
@@ -1329,7 +1420,7 @@ export default function ProjectPage() {
                               value={newServerForm.name}
                               onChange={e => setNewServerForm({...newServerForm, name: e.target.value})}
                               disabled={!!editingServerName}
-                              style={{ fontSize: '0.8rem', padding: '0.5rem 0.75rem', background: 'rgba(0, 0, 0, 0.2)', border: '1px solid rgba(255,255,255,0.1)' }}
+                              style={{ fontSize: '0.8rem', padding: '0.5rem 0.75rem', background: 'var(--inset-bg)', border: '1px solid var(--border-color)' }}
                             />
                           </div>
 
@@ -1337,7 +1428,7 @@ export default function ProjectPage() {
                           {addServerTab === 'url' && (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                               <div className="form-group" style={{ margin: 0 }}>
-                                <label style={{ fontSize: '0.75rem', color: 'rgba(255, 255, 255, 0.6)', marginBottom: '0.25rem', display: 'block' }}>
+                                <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.25rem', display: 'block' }}>
                                   SSE Endpoint URL
                                 </label>
                                 <input 
@@ -1346,9 +1437,9 @@ export default function ProjectPage() {
                                   className="form-input"
                                   value={newServerForm.url}
                                   onChange={e => setNewServerForm({...newServerForm, url: e.target.value})}
-                                  style={{ fontSize: '0.8rem', padding: '0.5rem 0.75rem', background: 'rgba(0, 0, 0, 0.2)', border: '1px solid rgba(255,255,255,0.1)' }}
+                                  style={{ fontSize: '0.8rem', padding: '0.5rem 0.75rem', background: 'var(--inset-bg)', border: '1px solid var(--border-color)' }}
                                 />
-                                <p style={{ fontSize: '0.7rem', color: 'rgba(255, 255, 255, 0.4)', marginTop: '0.25rem', margin: 0 }}>
+                                <p style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginTop: '0.25rem', margin: 0 }}>
                                   This initiates Zoho Dynamic Client Registration (DCR) and redirects you to the OAuth authorization consent page.
                                 </p>
                               </div>
@@ -1371,7 +1462,7 @@ export default function ProjectPage() {
                               >
                                 {isAddingServer ? (
                                   <>
-                                    <span style={{ display: 'inline-block', width: '12px', height: '12px', border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'mcp-spin 1s linear infinite' }}></span>
+                                    <span style={{ display: 'inline-block', width: '12px', height: '12px', border: '2px solid var(--chip-bg)', borderTopColor: 'var(--text-on-accent)', borderRadius: '50%', animation: 'mcp-spin 1s linear infinite' }}></span>
                                     <span>Authorizing...</span>
                                   </>
                                 ) : (
@@ -1384,7 +1475,7 @@ export default function ProjectPage() {
                           {addServerTab === 'json' && (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                               <div className="form-group" style={{ margin: 0 }}>
-                                <label style={{ fontSize: '0.75rem', color: 'rgba(255, 255, 255, 0.6)', marginBottom: '0.25rem', display: 'block' }}>
+                                <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.25rem', display: 'block' }}>
                                   SSE Endpoint URL (Optional)
                                 </label>
                                 <input 
@@ -1393,12 +1484,12 @@ export default function ProjectPage() {
                                   className="form-input"
                                   value={newServerForm.url}
                                   onChange={e => setNewServerForm({...newServerForm, url: e.target.value})}
-                                  style={{ fontSize: '0.8rem', padding: '0.5rem 0.75rem', background: 'rgba(0, 0, 0, 0.2)', border: '1px solid rgba(255,255,255,0.1)' }}
+                                  style={{ fontSize: '0.8rem', padding: '0.5rem 0.75rem', background: 'var(--inset-bg)', border: '1px solid var(--border-color)' }}
                                 />
                               </div>
 
                               <div className="form-group" style={{ margin: 0 }}>
-                                <label style={{ fontSize: '0.75rem', color: 'rgba(255, 255, 255, 0.6)', marginBottom: '0.25rem', display: 'block' }}>
+                                <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.25rem', display: 'block' }}>
                                   Credentials JSON
                                 </label>
                                 <textarea 
@@ -1411,12 +1502,12 @@ export default function ProjectPage() {
                                     fontSize: '0.75rem', 
                                     fontFamily: 'monospace', 
                                     padding: '0.5rem 0.75rem', 
-                                    background: 'rgba(0, 0, 0, 0.2)', 
-                                    border: '1px solid rgba(255,255,255,0.1)',
+                                    background: 'var(--inset-bg)', 
+                                    border: '1px solid var(--border-color)',
                                     resize: 'vertical'
                                   }}
                                 />
-                                <p style={{ fontSize: '0.7rem', color: 'rgba(255, 255, 255, 0.4)', marginTop: '0.25rem', margin: 0 }}>
+                                <p style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginTop: '0.25rem', margin: 0 }}>
                                   Paste the credentials JSON object. It must contain client ID, refresh token, and token endpoint.
                                 </p>
                               </div>
@@ -1439,7 +1530,7 @@ export default function ProjectPage() {
                               >
                                 {isAddingServer ? (
                                   <>
-                                    <span style={{ display: 'inline-block', width: '12px', height: '12px', border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'mcp-spin 1s linear infinite' }}></span>
+                                    <span style={{ display: 'inline-block', width: '12px', height: '12px', border: '2px solid var(--chip-bg)', borderTopColor: 'var(--text-on-accent)', borderRadius: '50%', animation: 'mcp-spin 1s linear infinite' }}></span>
                                     <span>Verifying & Saving...</span>
                                   </>
                                 ) : (
@@ -1452,7 +1543,7 @@ export default function ProjectPage() {
                           {addServerTab === 'config' && (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                               <div className="form-group" style={{ margin: 0 }}>
-                                <label style={{ fontSize: '0.75rem', color: 'rgba(255, 255, 255, 0.6)', marginBottom: '0.25rem', display: 'block' }}>
+                                <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.25rem', display: 'block' }}>
                                   Server Configuration JSON (Raw config block)
                                 </label>
                                 <textarea 
@@ -1465,12 +1556,12 @@ export default function ProjectPage() {
                                     fontSize: '0.75rem', 
                                     fontFamily: 'monospace', 
                                     padding: '0.5rem 0.75rem', 
-                                    background: 'rgba(0, 0, 0, 0.2)', 
-                                    border: '1px solid rgba(255,255,255,0.1)',
+                                    background: 'var(--inset-bg)', 
+                                    border: '1px solid var(--border-color)',
                                     resize: 'vertical'
                                   }}
                                 />
-                                <p style={{ fontSize: '0.7rem', color: 'rgba(255, 255, 255, 0.4)', marginTop: '0.25rem', margin: 0 }}>
+                                <p style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginTop: '0.25rem', margin: 0 }}>
                                   Paste the raw MCP server configuration block (e.g. stdio transport parameters or SSE URL configuration).
                                 </p>
                               </div>
@@ -1493,7 +1584,7 @@ export default function ProjectPage() {
                               >
                                 {isAddingServer ? (
                                   <>
-                                    <span style={{ display: 'inline-block', width: '12px', height: '12px', border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'mcp-spin 1s linear infinite' }}></span>
+                                    <span style={{ display: 'inline-block', width: '12px', height: '12px', border: '2px solid var(--chip-bg)', borderTopColor: 'var(--text-on-accent)', borderRadius: '50%', animation: 'mcp-spin 1s linear infinite' }}></span>
                                     <span>Saving Configuration...</span>
                                   </>
                                 ) : (
@@ -1546,17 +1637,20 @@ export default function ProjectPage() {
 
                             return (
                               <div key={serverName} style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '8px', overflow: 'hidden' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', background: 'rgba(255,255,255,0.01)' }}>
-                                  <div>
-                                    <h4 style={{ fontSize: '0.9rem', color: 'var(--text-primary)', margin: 0, fontWeight: '600' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', padding: '0.75rem', background: 'var(--row-alt)', minWidth: 0 }}>
+                                  <div style={{ flex: 1, minWidth: '80px' }}>
+                                    <h4 style={{ fontSize: '0.9rem', color: 'var(--text-primary)', margin: 0, fontWeight: '600', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                       {serverName.replace('-', ' ').replace(/\b\w/g, c => c.toUpperCase())}
                                     </h4>
-                                    <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', fontFamily: 'monospace', marginTop: '0.15rem' }}>
+                                    <div
+                                      title={connectionSubtitle}
+                                      style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', fontFamily: 'monospace', marginTop: '0.15rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                                    >
                                       {connectionSubtitle}
                                     </div>
                                   </div>
 
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexShrink: 0 }}>
                                     {/* TOGGLE SWITCH */}
                                     <label style={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer', position: 'relative' }}>
                                       <input 
@@ -1633,7 +1727,7 @@ export default function ProjectPage() {
                                       onClick={() => handleDeleteServer(serverName)}
                                       aria-label={`Delete ${serverName} connection`}
                                       title="Delete Connection"
-                                      style={{ color: 'var(--danger-color)', padding: '0.2rem', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                                      style={{ color: 'var(--danger-color)', padding: '0.2rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', border: '1px solid var(--danger-color)', borderRadius: '4px', background: 'transparent' }}
                                     >
                                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                         <path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
@@ -1657,7 +1751,7 @@ export default function ProjectPage() {
 
                                 {/* EXPANDABLE TOOL CHECKLIST */}
                                 {isExpanded && (
-                                  <div style={{ padding: '0.75rem 1rem', borderTop: '1px solid var(--border-color)', background: 'rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                                  <div style={{ padding: '0.75rem 1rem', borderTop: '1px solid var(--border-color)', background: 'var(--inset-bg)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
                                       <span style={{ fontSize: '0.8rem', fontWeight: '500', color: 'var(--text-secondary)' }}>Selected Capabilities</span>
                                       <button 
@@ -1709,7 +1803,7 @@ export default function ProjectPage() {
                       </div>
                     </div>
 
-                    <details style={{ background: 'rgba(0,0,0,0.1)', padding: '0.75rem', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                    <details style={{ background: 'var(--inset-bg)', padding: '0.75rem', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
                       <summary style={{ cursor: 'pointer', fontSize: '0.8rem', color: 'var(--text-secondary)', outline: 'none' }}>
                         Developer Config (Raw JSON Configuration)
                       </summary>
@@ -1732,6 +1826,43 @@ export default function ProjectPage() {
                         style={{ width: '100%' }}
                       >
                         {isSavingSpecs ? 'Saving...' : 'Save Workspace Settings'}
+                      </button>
+                    </div>
+
+                    <div style={{
+                      marginTop: '2rem',
+                      padding: '1rem',
+                      borderRadius: '8px',
+                      border: '1px solid var(--danger-color)',
+                      background: 'var(--danger-soft)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '0.75rem'
+                    }}>
+                      <h4 style={{ margin: 0, color: 'var(--danger-color)', fontSize: '0.95rem' }}>Danger zone</h4>
+                      <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                        Permanently delete this project and all of its chats, MCP credentials, and activity logs.
+                        Changes already made in the client&apos;s Zoho account are not rolled back.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDeleteConfirmName('');
+                          setShowDeleteProjectModal(true);
+                        }}
+                        style={{
+                          alignSelf: 'flex-start',
+                          color: 'var(--text-on-accent)',
+                          background: 'var(--danger-color)',
+                          border: 'none',
+                          borderRadius: '6px',
+                          padding: '0.45rem 0.85rem',
+                          fontSize: '0.8rem',
+                          fontWeight: 600,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Delete permanently
                       </button>
                     </div>
                   </div>
