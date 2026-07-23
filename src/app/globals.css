@@ -30,15 +30,14 @@
   --text-on-accent: #ffffff;
   --focus-ring: rgba(117, 132, 103, 0.25);
 
-  --sidebar-width: 280px;
   --header-height: 70px;
 }
  
 [data-theme='dark'] {
-  /* Royal green dark theme — charcoal surfaces, green accents */
-  --bg-primary: #141512;
-  --bg-secondary: #0F100E;
-  --bg-tertiary: #242622;
+  /* Royal green dark theme — near-black surfaces, green accents */
+  --bg-primary: #020202;
+  --bg-secondary: #060606;
+  --bg-tertiary: #101010;
   --text-primary: #F0F2ED;
   --text-secondary: #A8ADA3;
   --accent-color: #9CAF88;
@@ -125,18 +124,10 @@ h1, h2, h3, h4, h5, h6 {
   overflow: hidden;
 }
 
-.sidebar {
-  width: var(--sidebar-width);
-  height: 100vh;
-  background-color: var(--bg-secondary);
-  border-right: 1px solid var(--border-color);
-  display: flex;
-  flex-direction: column;
-  transition: transform 0.3s ease;
-}
-
 .main-content {
   flex: 1;
+  width: 100%;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   height: 100vh;
