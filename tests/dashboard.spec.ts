@@ -8,7 +8,7 @@ test.describe('Dashboard', () => {
 
     await expect(page.getByRole('heading', { name: 'Client Projects' })).toBeVisible();
 
-    const projectCards = page.locator('a.card');
+    const projectCards = page.locator('div.card[role="link"]');
     const emptyState = page.getByText('No projects found matching the criteria.');
 
     await expect(projectCards.first().or(emptyState)).toBeVisible();
