@@ -74,7 +74,11 @@ export default defineConfig({
   webServer: {
     command: 'npm run start',
     url: 'http://localhost:3000',
-    reuseExistingServer: !process.env.CI,
+    // Deploy sets PLAYWRIGHT_FORCE_WEB_SERVER=1 so the gate never reuses a
+    // stray :3000 process (which may lack PLAYWRIGHT_TEST → 401 on API creates).
+    // Do NOT use CI=1 for this: that also forces workers:1 and retries:2.
+    reuseExistingServer:
+      process.env.PLAYWRIGHT_FORCE_WEB_SERVER === '1' ? false : !process.env.CI,
     env: {
       NEXTAUTH_SECRET: 'dummy_secret_for_tests',
       PLAYWRIGHT_TEST: 'true',

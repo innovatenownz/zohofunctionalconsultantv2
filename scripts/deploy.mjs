@@ -85,7 +85,16 @@ console.log('\n--- Step 2/3: Compiling Production Build ---');
 runCommand('npm run build', 'Next.js compilation failed.');
 
 console.log('\n--- Step 3/3: Running Playwright E2E Tests ---');
-runCommand('npx playwright test', 'Playwright E2E tests failed.');
+console.log('Running: npx playwright test (PLAYWRIGHT_FORCE_WEB_SERVER=1)');
+try {
+  execSync('npx playwright test', {
+    stdio: 'inherit',
+    env: { ...process.env, PLAYWRIGHT_FORCE_WEB_SERVER: '1' },
+  });
+} catch {
+  console.error('\nERROR: Playwright E2E tests failed.');
+  process.exit(1);
+}
 
 // 3. Perform Deployment
 const deployCommand = `gcloud run deploy ${serviceName} --source . --region ${region} --env-vars-file ${configFile} --tag=${revisionTag} --allow-unauthenticated`;
