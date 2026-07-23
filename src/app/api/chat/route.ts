@@ -21,6 +21,9 @@ function getMcpUserMessage(error: unknown): string {
   switch (error.code) {
     case 'ZOHO_TOKEN_EXPIRED':
       return 'Your Zoho connection has expired. Please reconnect it in Settings & Context.';
+    case 'ZOHO_SCOPE_MISMATCH':
+      return error.message ||
+        'This Zoho connection is missing a required permission. Reconnect this MCP server and grant full CRM access during authorization.';
     case 'ZOHO_UNREACHABLE':
       return "We couldn't reach your Zoho connection right now. Please try again shortly.";
     case 'ZOHO_NOT_CONFIGURED':
@@ -309,31 +312,48 @@ export async function POST(req: Request) {
                 try {
                   // Send to MCP Agent Client
                   const result = await executeMCPCommand(filteredMcpServers, commandToRun, projectId);
-                  const { ok, errorSummary } = interpretMcpToolResult(result);
-                  const fullJson = JSON.stringify(result, null, 2);
-                  const header = ok
-                    ? '**✅ MCP Command Executed Successfully:**'
-                    : `**❌ MCP Command Failed:** ${errorSummary || 'Tool reported an error'}`;
-                  // Stream the full JSON so the UI "Developer Details" panel still has the complete payload.
-                  const resultMsg = `\n\n${header}\n\`\`\`json\n${fullJson}\n\`\`\``;
-                  sendEvent('content', { delta: resultMsg });
-                  // Persist/resent-to-Gemini copy is action-aware: compact list_tools / get_tool_schema
-                  // get higher caps; generic Zoho results stay at 2000 chars.
-                  const persistedJson = capPersistedResultJson(actionName, fullJson);
-                  const persistedResultMsg = `\n\n${header}\n\`\`\`json\n${persistedJson}\n\`\`\``;
-                  assistantContent += persistedResultMsg;
+                  const { ok, errorSummary, errorKind } = interpretMcpToolResult(result);
 
-                  if (projectId) {
-                    if (ok) {
-                      await updateProjectMemoryFromExecution(projectId, String(commandToRun.action), commandToRun, true);
-                      await logActivity(projectId, 'mcp_execution', `Executed ${commandToRun.action} successfully`, { command: commandToRun, result });
-                    } else {
-                      await logActivity(projectId, 'mcp_failure', `Tool returned error for ${commandToRun.action}: ${errorSummary || 'isError'}`, {
+                  // Scope mismatch: friendly text only (no raw JSON blob in chat)
+                  if (!ok && errorKind === 'ZOHO_SCOPE_MISMATCH') {
+                    const resultMsg = `\n\n**❌ MCP Command Failed:** ${errorSummary}`;
+                    sendEvent('content', { delta: resultMsg });
+                    assistantContent += resultMsg;
+
+                    if (projectId) {
+                      await logActivity(projectId, 'mcp_failure', `Tool returned error for ${commandToRun.action}: ${errorSummary || 'scope mismatch'}`, {
                         command: commandToRun,
                         result,
-                        error: errorSummary || 'Tool reported an error (isError: true)',
-                        code: 'MCP_TOOL_IS_ERROR',
+                        error: errorSummary || 'ZOHO_SCOPE_MISMATCH',
+                        code: 'ZOHO_SCOPE_MISMATCH',
                       });
+                    }
+                  } else {
+                    const fullJson = JSON.stringify(result, null, 2);
+                    const header = ok
+                      ? '**✅ MCP Command Executed Successfully:**'
+                      : `**❌ MCP Command Failed:** ${errorSummary || 'Tool reported an error'}`;
+                    // Stream the full JSON so the UI "Developer Details" panel still has the complete payload.
+                    const resultMsg = `\n\n${header}\n\`\`\`json\n${fullJson}\n\`\`\``;
+                    sendEvent('content', { delta: resultMsg });
+                    // Persist/resent-to-Gemini copy is action-aware: compact list_tools / get_tool_schema
+                    // get higher caps; generic Zoho results stay at 2000 chars.
+                    const persistedJson = capPersistedResultJson(actionName, fullJson);
+                    const persistedResultMsg = `\n\n${header}\n\`\`\`json\n${persistedJson}\n\`\`\``;
+                    assistantContent += persistedResultMsg;
+
+                    if (projectId) {
+                      if (ok) {
+                        await updateProjectMemoryFromExecution(projectId, String(commandToRun.action), commandToRun, true);
+                        await logActivity(projectId, 'mcp_execution', `Executed ${commandToRun.action} successfully`, { command: commandToRun, result });
+                      } else {
+                        await logActivity(projectId, 'mcp_failure', `Tool returned error for ${commandToRun.action}: ${errorSummary || 'isError'}`, {
+                          command: commandToRun,
+                          result,
+                          error: errorSummary || 'Tool reported an error (isError: true)',
+                          code: 'MCP_TOOL_IS_ERROR',
+                        });
+                      }
                     }
                   }
                 } catch (e: any) {

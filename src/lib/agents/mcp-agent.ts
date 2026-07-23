@@ -6,6 +6,7 @@ import { resolveToolSchemaLookup, toCompactToolCatalog } from '../mcp-tool-catal
 
 export type McpErrorCode =
   | 'ZOHO_TOKEN_EXPIRED'
+  | 'ZOHO_SCOPE_MISMATCH'
   | 'ZOHO_UNREACHABLE'
   | 'ZOHO_NOT_CONFIGURED'
   | 'ZOHO_SERVER_NAME_INVALID'
@@ -56,10 +57,21 @@ function isUnauthorizedError(err: unknown): boolean {
     || String(err || '').includes('401');
 }
 
+function isScopeMismatchError(err: unknown): boolean {
+  const text = getErrorText(err);
+  // Distinct from expired-token: Zoho permission/scope denial body
+  return text.includes('no_permission')
+    || text.includes('"code":"no_permission"')
+    || text.includes('crm_implied_api_access');
+}
+
 function isTokenExpiredError(err: unknown): boolean {
+  // Do NOT treat NO_PERMISSION 403s as expired tokens
+  if (isScopeMismatchError(err)) return false;
+
   const anyErr = err as { code?: unknown; status?: unknown };
   if (anyErr?.status === 403 || anyErr?.code === 403) {
-    return true;
+    return true; // genuine auth/forbidden without NO_PERMISSION body → still expired/invalid
   }
   if (isUnauthorizedError(err)) {
     return true;
@@ -86,6 +98,14 @@ function isNetworkError(err: unknown): boolean {
 function classifyMcpError(err: unknown): McpError {
   if (err instanceof McpError) {
     return err;
+  }
+
+  if (isScopeMismatchError(err)) {
+    return new McpError(
+      'ZOHO_SCOPE_MISMATCH',
+      'This Zoho connection is missing a required permission. Reconnect this MCP server and grant full CRM access during authorization.',
+      err
+    );
   }
 
   if (isTokenExpiredError(err)) {

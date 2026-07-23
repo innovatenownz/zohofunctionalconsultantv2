@@ -12,6 +12,26 @@ const TOOL_NOT_FOUND_LIVE_FIXTURE = {
   isError: false,
 };
 
+/** Live capture: ZohoCRM_getProfiles via MCP "riddhi" — OAuth missing Crm_Implied_Api_Access. */
+const NO_PERMISSION_LIVE_FIXTURE = {
+  content: [
+    {
+      type: 'text',
+      text: '{"code":"NO_PERMISSION","details":{"permissions":["Crm_Implied_Api_Access"]},"message":"permission denied","status":"error"}\n',
+    },
+  ],
+  structuredContent: {
+    status: 'failure',
+    data: {
+      code: 'NO_PERMISSION',
+      details: { permissions: ['Crm_Implied_Api_Access'] },
+      message: 'permission denied',
+      status: 'error',
+    },
+  },
+  isError: true,
+};
+
 test.describe('interpretMcpToolResult', () => {
   test('treats null / undefined / non-objects as success (no crash)', () => {
     expect(interpretMcpToolResult(null)).toEqual({ ok: true });
@@ -47,6 +67,14 @@ test.describe('interpretMcpToolResult', () => {
     });
     expect(result.ok).toBe(false);
     expect(result.errorSummary).toContain('MANDATORY_NOT_FOUND');
+  });
+
+  test('classifies live NO_PERMISSION fixture as ZOHO_SCOPE_MISMATCH with permission name', () => {
+    const result = interpretMcpToolResult(NO_PERMISSION_LIVE_FIXTURE);
+    expect(result.ok).toBe(false);
+    expect(result.errorKind).toBe('ZOHO_SCOPE_MISMATCH');
+    expect(result.errorSummary).toContain('Crm_Implied_Api_Access');
+    expect(result.errorSummary).toMatch(/missing a required permission/i);
   });
 
   test('prefers structuredContent code/message when present (tier 1)', () => {
